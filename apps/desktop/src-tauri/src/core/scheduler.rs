@@ -17,6 +17,18 @@ pub struct Timer {
     pub due_at: i64,
     /// 周期计时器的间隔；None = 响一次就没了
     pub repeat_ms: Option<i64>,
+    /// 专注段：头顶显示倒计时，期间她去做 `target`。普通提醒没有这一项
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<Focus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Focus {
+    /// 起点，Body 用它画进度环
+    pub started_at: i64,
+    /// 期间让她做什么（动作 id 或 tag）；None = 只是计时
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -51,9 +63,26 @@ impl Scheduler {
             label: label.to_string(),
             due_at: now_ms + delay_ms.max(0),
             repeat_ms: repeat.then_some(delay_ms.max(1)),
+            focus: None,
         };
         self.timers.push(t.clone());
         t
+    }
+
+    /// 排一个专注段。同一时间只有一段：再开一个就把上一个换掉
+    pub fn add_focus(&mut self, label: &str, delay_ms: i64, target: Option<String>, now_ms: i64) -> Timer {
+        self.timers.retain(|t| t.focus.is_none());
+        let mut t = self.add(label, delay_ms, false, now_ms);
+        t.focus = Some(Focus { started_at: now_ms, target });
+        if let Some(slot) = self.timers.iter_mut().find(|x| x.id == t.id) {
+            slot.focus = t.focus.clone();
+        }
+        t
+    }
+
+    /// 正在跑的专注段
+    pub fn focus(&self) -> Option<&Timer> {
+        self.timers.iter().find(|t| t.focus.is_some())
     }
 
     pub fn cancel(&mut self, id: &str) -> bool {

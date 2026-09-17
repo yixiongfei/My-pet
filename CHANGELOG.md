@@ -3,6 +3,17 @@
 ## 未发布 · Phase 1「Body MVP」+ Phase 2 状态机
 
 ### 新增
+- **气泡搬到头顶**。pet 窗口高 = 宽 × 1.6（`HEAD_ROOM`），上面那段放气泡（尾巴指向头）和倒计时环，永远穿透；命中掩码、触摸区域、拖拽锚点只按下面的正方形算。之前的气泡贴在窗口底部盖在立绘上，三行折叠还带一个点不到的「展开」——现在按头顶区的高度决定行数（最多七行）、超出打省略号，流式输出时只显示尾巴，念完之前不收。
+- **头顶倒计时**：「帮我设个番茄钟，学习一个小时吧」「专注 50 分钟」「十分钟后叫我」——`intent.rs` 认出番茄钟 / 提醒，`scheduler.rs` 多了带起点的**专注段**（`focus`），Body 画一圈渐变进度环 + 剩余时间 + 标签，最后一分钟变暖色。期间她去做对应的事（保护期），到点 `focus:ended` + 提醒。你亲口说了时长的使唤（「去玩 10 分钟」）也挂倒计时。
+- **对话窗口贴边收起**（`dock.rs`）：拖到屏幕左右边缘就吸附，鼠标离开 0.4 s 后滑进去只留一条 8 px 的边，鼠标碰到边再滑出来；有焦点（正在打字）不收；拖离边缘解除吸附；关了再开回到原处。跟着光标轮询线程走，不另起线程。
+- 对话窗口：用户消息悬浮出「重新发送」；去掉底部说明文字和快捷键提示；隐藏滚动条。
+- **声音改成 Neuro 风**：默认 `vivian` + 「语气平稳、起伏小，节奏偏快，音调偏高」的指令，心情不再掺和语气；tts-server 不做变速（`speed` 字段被它忽略），所以倍速在 Body 播放时做（`playbackRate` 1.12，**不保持音高**——快一点就高小半个音，正是「偏快偏高」）。设置页有「Neuro 风 / 自然」两个预设和保持音高的开关。
+- `start-vpet.ps1` 顺手清掉父进程已死的 `llama-server.exe`：ollama.exe 被杀或崩掉后它的 runner 会留下来，每个占好几 GB 提交内存——这台机器上两个孤儿 runner 把页面文件顶到了上限，`cargo` 都 mmap 不了。
+- `scripts/release.ps1` / `pnpm check` / `pnpm release`：测试 → 类型检查 → 停桌宠 → 编 release → 拉起。CI 跑同一套。`CLAUDE.md` 写明改代码必须同步改 docs。
+
+### 修复
+- **「本地模型返回了空回答」**：qwen3.x 在 think=false 下偶尔一开口就吐一个 `<think>`，而它是停止词——生成当场结束，什么都没有。不再当停止词，`clean_reply` 把 `<think>…</think>` 整段抠掉。
+- **回答戛然而止**。用同一段上下文回放实测：五个一样的「醒醒，别睡了」连着放进历史，9B 模型有一半的回答说到一半就发 EOS，去掉停止词、关掉重复惩罚都没用；把重复的问题只留最后一次、上下文从十二轮减到八轮，就基本不再发生。另外：历史进上下文前再过一遍 `clean_reply`（上一条以「[旁白：…」收尾的回答会教它照抄）；结尾没闭合的「(好奇」这种开了个动作描写就停的尾巴直接去掉；剩下真被截断的补一个「…」，读起来是欲言又止而不是断线。
 - **她会说话：Qwen3-TTS 语音**（`src-tauri/src/tts.rs`）。后端是 [qwentts.cpp](https://github.com/ServeurpersoCom/qwentts.cpp)（Qwen3-TTS-12Hz 的 C++/GGML 移植，自带 OpenAI 兼容的 `tts-server`），模型是 `Qwen3-TTS-12Hz-0.6B-CustomVoice` 的 Q8_0 GGUF——不是 Python + PyTorch：这台机器没有 CUDA，PyTorch 在 CPU 上跑 0.6B 是 2 倍实时，而 GGML 走 Vulkan 核显是 0.75 倍实时，还省了一整套 Python 环境。
   - **借 Ollama 包里的 `ggml-vulkan.dll`**：qwentts.cpp 按动态后端（`GGML_BACKEND_DL`）编译，运行时加载 exe 旁边的 backend DLL；两边的 ggml 后端 ABI 都是版本 2，Ollama 的 Vulkan 后端放过去就能用，不用装 Vulkan SDK。`scripts/setup-tts.ps1` 一键克隆 / 编译（VS Build Tools 自带的 CMake + Ninja）/ 下载权重 / 试合成；`start-vpet.ps1` 自动拉起 `tts-server`（127.0.0.1:8090）。没装就静默退回只出气泡。
   - **Core 只管拿字节，Body 负责播**：`tts_speak` 返回 WAV，磁盘缓存按 `声音|语气|语速|文本` 的 FNV 哈希命名——固定台词第二次说不用再等。Body 的说话队列按句合成（句号 / 问号 / 感叹号），前一句在放的时候后一句已经在合成；出声期间播 `say` 动画，一次性动画（摸头、拆礼物）不被打断，播完接上。

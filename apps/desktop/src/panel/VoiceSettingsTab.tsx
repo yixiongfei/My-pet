@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { IS_TAURI } from '../body/ipc'
-import { invokeStrict } from '../chat/api'
+import { NEURO_STYLE, invokeStrict } from '../chat/api'
 import type { ActionInfo, ChatSettings, LineMode, TtsStatus } from '../chat/api'
 import { Icon } from '../chat/Icons'
 
 /** 与 src-tauri/src/tts.rs 的 SPEAKERS 一致：名字 → 给人看的描述 */
 const SPEAKERS: Array<[string, string]> = [
-  ['serena', '温柔的年轻女声（默认）'], ['vivian', '明亮、带点俏皮的年轻女声'], ['ono_anna', '轻快活泼的日系女声'],
+  ['vivian', '明亮、带点俏皮的年轻女声（默认）'], ['serena', '温柔的年轻女声'], ['ono_anna', '轻快活泼的日系女声'],
   ['sohee', '温暖、情绪丰富的韩系女声'], ['uncle_fu', '低沉醇厚的大叔声'], ['dylan', '清亮自然的北京男声'],
   ['eric', '带点沙哑的成都男声'], ['ryan', '有节奏感的英文男声'], ['aiden', '阳光的美式男声'],
 ]
@@ -114,14 +114,19 @@ export function VoiceSettingsTab({ settings, setSettings, busy, action, persist 
           {SPEAKERS.map(([id, label]) => <option key={id} value={id}>{label} · {id}</option>)}
           {tts?.voices.filter(v => !SPEAKERS.some(([id]) => id === v)).map(v => <option key={v} value={v}>{v}</option>)}
         </select>
-        <small>她是个温柔又好奇的少女，默认用 serena；想活泼一点换 vivian。</small>
+        <small>默认 vivian 配平稳偏快的语气，接近 Neuro 那种电子少女音；想温柔一点换 serena。</small>
       </label>
-      <label className="form-field">语气说明<input value={voice.style} maxLength={200} placeholder="例如：语气自然亲切，像和熟人说话" onChange={e => setVoice({ style: e.target.value })} /><small>交给语音模型的风格指令，留空也可以。</small></label>
+      <label className="form-field">语气说明<input value={voice.style} maxLength={200} placeholder="例如：语气自然亲切，像和熟人说话" onChange={e => setVoice({ style: e.target.value })} /><small>交给语音模型的风格指令，中英文都听得懂。</small></label>
     </div>
-    <label className="toggle-row"><span><strong>语气跟着心情走</strong><small>开心时轻快一点，累了、状态差的时候有气无力。</small></span><input type="checkbox" role="switch" checked={voice.moodStyle} onChange={e => setVoice({ moodStyle: e.target.checked })} /><span className="switch-track" /></label>
+    <div className="size-presets">
+      <button className={voice.style === NEURO_STYLE && !voice.moodStyle ? 'selected' : ''} onClick={() => setVoice({ voice: 'vivian', style: NEURO_STYLE, moodStyle: false, speed: 1.12, keepPitch: false })}>Neuro 风：平稳偏快偏高</button>
+      <button className={voice.style === '' && voice.moodStyle ? 'selected' : ''} onClick={() => setVoice({ voice: 'serena', style: '', moodStyle: true, speed: 1, keepPitch: false })}>自然：温柔随心情</button>
+    </div>
+    <label className="toggle-row"><span><strong>语气跟着心情走</strong><small>开心时轻快一点，累了、状态差的时候有气无力。要平稳的电子音就关掉。</small></span><input type="checkbox" role="switch" checked={voice.moodStyle} onChange={e => setVoice({ moodStyle: e.target.checked })} /><span className="switch-track" /></label>
     <label className="field-label" htmlFor="voice-speed">语速<span>{voice.speed.toFixed(2)}×</span></label>
-    <input id="voice-speed" className="range-input" type="range" min="0.5" max="2" step="0.05" value={voice.speed} onChange={e => setVoice({ speed: Number(e.target.value) })} />
-    <div className="range-captions"><span>慢一点</span><span>快一点</span></div>
+    <input id="voice-speed" className="range-input" type="range" min="0.7" max="1.6" step="0.02" value={voice.speed} onChange={e => setVoice({ speed: Number(e.target.value) })} />
+    <div className="range-captions"><span>慢一点（音调也低一点）</span><span>快一点（音调也高一点）</span></div>
+    <label className="toggle-row"><span><strong>变速时保持音高</strong><small>关着的时候语速和音调一起变：快 12% 就高小半个音，这正是「偏快偏高」的来源。</small></span><input type="checkbox" role="switch" checked={voice.keepPitch} onChange={e => setVoice({ keepPitch: e.target.checked })} /><span className="switch-track" /></label>
     <label className="form-field">语音服务地址<input value={voice.endpoint} maxLength={300} placeholder="http://127.0.0.1:8090" onChange={e => setVoice({ endpoint: e.target.value })} /><small>仅本机地址。scripts/start-vpet.ps1 默认在 8090 端口拉起 tts-server。</small></label>
     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
       <button className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? '保存中…' : '保存语音设置'}<Icon name="check" size={16} /></button>

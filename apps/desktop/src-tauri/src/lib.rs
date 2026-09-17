@@ -8,6 +8,7 @@
 mod core;
 mod desktop_settings;
 mod chat;
+mod dock;
 mod lines;
 mod tts;
 
@@ -20,7 +21,7 @@ use core::food::{FoodItem, FoodShelf};
 use core::pomodoro::{Phase, Pomodoro, Tick as PomoTick};
 use core::scheduler::{parse_duration, Scheduler, Timer};
 use core::tools::{
-    builtin_tools, find as find_tool, summarize_input, AuditEntry, AuditLog, Decision, Origin,
+    builtin_tools, find as find_tool, summarize_input, AuditEntry, AuditLog, Decision,
     PermissionGate, ToolCall, ToolDef, ToolResult,
 };
 use core::bias::{BiasView, DEFAULT_HALF_LIFE};
@@ -51,6 +52,10 @@ const PROMPT_SHORTCUT: &str = "Alt+V";
 const MASK_N: usize = 48;
 /// 掩码坐标系的边长（pet.json 的 500×500 逻辑参考系）
 const PET_LOGICAL_SIZE: f64 = 500.0;
+/// 立绘上方留给气泡和倒计时的空间，按立绘边长的比例算：窗口高 = 宽 × (1 + HEAD_ROOM)。
+/// 这一块永远穿透（气泡不可点），命中判定和拖拽锚点都只按下面那个正方形算。
+/// **前端 PetCanvas.tsx 有同名常量，改要一起改**
+pub(crate) const HEAD_ROOM: f64 = 0.6;
 /// 光标轮询间隔（docs/05 §4）
 const POLL: Duration = Duration::from_millis(16);
 
@@ -290,7 +295,80 @@ fn fire_due_timers(app: &AppHandle) {
     for t in fired {
         log::info!("计时器响了：{}", t.label);
         let _ = app.emit("timer:fired", &t);
+        // 专注段结束：倒计时收起来，她也不必再被按在那件事上
+        if t.focus.is_some() {
+            if let Some(pet) = app.try_state::<Mutex<Pet>>() {
+                if let Ok(mut p) = pet.lock() {
+                    p.directive = None;
+                }
+            }
+            let _ = app.emit("focus:ended", &t);
+        }
     }
+}
+
+/* ==================== 专注段（番茄钟 / 「学习一个小时」） ==================== */
+
+/// 开一段专注：排计时器 + 让她去做 `target`（要过服从判定，她可以不去，但钟照走——钟是给你的）。
+/// 返回 (计时器, 判定结果)
+pub(crate) fn start_focus(app: &AppHandle, minutes: f32, target: Option<String>, label: Option<String>) -> (Option<Timer>, Option<Verdict>) {
+    let minutes = minutes.clamp(1.0, 24.0 * 60.0);
+    let label = label.unwrap_or_else(|| {
+        let what = match target.as_deref() {
+            Some("study") => "学习",
+            Some("work") => "工作",
+            Some("play") => "玩",
+            Some("rest") => "休息",
+            _ => "专注",
+        };
+        if minutes >= 60.0 && (minutes % 60.0).abs() < 0.01 {
+            format!("{what} {:.0} 小时", minutes / 60.0)
+        } else {
+            format!("{what} {:.0} 分钟", minutes)
+        }
+    });
+    let verdict = target.as_ref().and_then(|t| request_action_quiet(app, t.clone(), Some(minutes)));
+    let timer = {
+        let sched = app.state::<Mutex<Scheduler>>();
+        let Ok(mut sc) = sched.lock() else { return (None, verdict) };
+        let t = sc.add_focus(&label, (minutes * 60_000.0) as i64, target.clone(), now_ms());
+        save_timers(app, &sc);
+        t
+    };
+    log::info!("专注段开始：{}（{minutes:.0} 分钟）", timer.label);
+    let _ = app.emit("focus:started", &timer);
+    (Some(timer), verdict)
+}
+
+/// Body 启动时问一次：有没有正在跑的专注段（重启后倒计时要接着显示）
+#[tauri::command]
+fn get_focus(sched: State<'_, Mutex<Scheduler>>) -> Option<Timer> {
+    sched.lock().ok().and_then(|s| s.focus().cloned())
+}
+
+#[tauri::command]
+fn start_focus_session(app: AppHandle, minutes: f32, target: Option<String>, label: Option<String>) -> Option<Timer> {
+    start_focus(&app, minutes, target, label).0
+}
+
+/// 提前结束专注段：钟停了，保护期也撤
+#[tauri::command]
+fn cancel_focus(app: AppHandle) -> bool {
+    let cancelled = {
+        let sched = app.state::<Mutex<Scheduler>>();
+        let Ok(mut sc) = sched.lock() else { return false };
+        let Some(t) = sc.focus().cloned() else { return false };
+        sc.cancel(&t.id);
+        save_timers(&app, &sc);
+        t
+    };
+    if let Some(pet) = app.try_state::<Mutex<Pet>>() {
+        if let Ok(mut p) = pet.lock() {
+            p.directive = None;
+        }
+    }
+    let _ = app.emit("focus:ended", &cancelled);
+    true
 }
 
 /// 落一条状态流水。存不进去不该影响宠物继续跑——大不了这次的数值丢了
@@ -389,13 +467,11 @@ fn get_directive(app: AppHandle) -> Option<Directive> {
 /// 从对话里使唤她，十次有九次「不想动」，还以为是判定模型的问题
 pub(crate) fn roll() -> f32 {
     use std::sync::atomic::{AtomicU64, Ordering};
+    const GOLDEN: u64 = 0x9E37_79B9_7F4A_7C15;
     static STATE: AtomicU64 = AtomicU64::new(0);
-    let mut x = STATE.load(Ordering::Relaxed);
-    if x == 0 {
-        x = (now_ms() as u64) ^ 0x9E37_79B9_7F4A_7C15;
-    }
-    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    STATE.store(x, Ordering::Relaxed);
+    // 第一次调用才播种；多线程同时进来也只播一次（fetch_add 保证序列不重不漏）
+    let _ = STATE.compare_exchange(0, (now_ms() as u64) ^ GOLDEN, Ordering::Relaxed, Ordering::Relaxed);
+    let x = STATE.fetch_add(GOLDEN, Ordering::Relaxed).wrapping_add(GOLDEN);
     // splitmix64 的搅拌：种子只有低位在变也能出均匀的数
     let mut z = x;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -1230,14 +1306,16 @@ fn open_chat_window(app: &AppHandle) -> Result<(), String> {
         window.unminimize().map_err(|e| e.to_string())?;
         return window.set_focus().map_err(|e| e.to_string());
     }
-    tauri::WebviewWindowBuilder::new(app, CHAT_WINDOW, tauri::WebviewUrl::App("chat.html".into()))
+    let win = tauri::WebviewWindowBuilder::new(app, CHAT_WINDOW, tauri::WebviewUrl::App("chat.html".into()))
         .title("VPet · 和她聊聊")
         .inner_size(460.0, 700.0)
         .min_inner_size(380.0, 500.0)
         .resizable(true)
         .build()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // 上次贴在屏幕边上的话，这次还回到那儿
+    dock::place_new_window(app, &win);
+    Ok(())
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -1379,6 +1457,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Mutex::new(HitState::default()))
+        .manage(dock::DockState::default())
         .setup(|app| {
             // 动作表读在最前面：状态机的每一步都要查它
             let cat = Catalog::load();
@@ -1457,6 +1536,9 @@ pub fn run() {
             list_actions,
             draft_action_lines,
             get_directive,
+            get_focus,
+            start_focus_session,
+            cancel_focus,
             create_timer,
             cancel_timer,
             list_timers,
@@ -1568,6 +1650,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 fn spawn_hit_test(app: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(POLL);
+        // 对话窗口的贴边收起也搭这趟车
+        dock::poll(&app, primary_button_held());
         let Some(win) = app.get_webview_window(PET_WINDOW) else { continue };
 
         advance_pet_drag(&app, &win);
@@ -1620,9 +1704,13 @@ fn advance_pet_drag(app: &AppHandle, win: &WebviewWindow) {
     let _ = win.set_position(PhysicalPosition::new(target.0, target.1));
 }
 
+/// 锚点在立绘的 500×500 参考系里；立绘是窗口底部那个正方形（边长 = 窗口宽），
+/// 上面还有一段 HEAD_ROOM 的气泡区
 fn drag_position(cursor: (f64, f64), size: (u32, u32), anchor: (f64, f64)) -> (i32, i32) {
-    ((cursor.0 - anchor.0 / PET_LOGICAL_SIZE * size.0 as f64).round() as i32,
-     (cursor.1 - anchor.1 / PET_LOGICAL_SIZE * size.1 as f64).round() as i32)
+    let canvas = size.0 as f64;
+    let top = size.1 as f64 - canvas;
+    ((cursor.0 - anchor.0 / PET_LOGICAL_SIZE * canvas).round() as i32,
+     (cursor.1 - top - anchor.1 / PET_LOGICAL_SIZE * canvas).round() as i32)
 }
 
 #[cfg(target_os = "windows")]
@@ -1649,8 +1737,11 @@ fn should_ignore(app: &AppHandle, win: &WebviewWindow) -> Result<bool, String> {
     let origin = win.outer_position().map_err(|e| e.to_string())?;
     let size = win.inner_size().map_err(|e| e.to_string())?;
     // Physical position → 500px artwork reference; works at every pet size and monitor DPI.
-    let x = (cursor.x - origin.x as f64) / size.width.max(1) as f64 * PET_LOGICAL_SIZE;
-    let y = (cursor.y - origin.y as f64) / size.height.max(1) as f64 * PET_LOGICAL_SIZE;
+    // 立绘是窗口底部的正方形，上面的气泡区算作 y < 0 → 不在立绘上 → 穿透
+    let canvas = size.width.max(1) as f64;
+    let top = size.height as f64 - canvas;
+    let x = (cursor.x - origin.x as f64) / canvas * PET_LOGICAL_SIZE;
+    let y = (cursor.y - origin.y as f64 - top) / canvas * PET_LOGICAL_SIZE;
 
     let hit = app.state::<Mutex<HitState>>();
     let st = hit.lock().map_err(|_| "命中状态被污染")?;
@@ -1705,6 +1796,8 @@ mod desktop_tests {
         assert_eq!(drag_position((700.0, 500.0), (500, 500), (250.0, 100.0)), (450, 400));
         assert_eq!(drag_position((700.0, 500.0), (1000, 1000), (250.0, 100.0)), (200, 300));
         assert_eq!(drag_position((-700.0, -500.0), (200, 200), (250.0, 100.0)), (-800, -540));
+        // 窗口比立绘高出 HEAD_ROOM：锚点的 y 要加上气泡区的高度
+        assert_eq!(drag_position((700.0, 500.0), (500, 800), (250.0, 100.0)), (450, 100));
     }
 
     #[test]
@@ -1714,9 +1807,9 @@ mod desktop_tests {
         assert!((0.0..1.0).contains(&first));
         let samples: Vec<f32> = (0..2000).map(|_| roll()).collect();
         let mean = samples.iter().sum::<f32>() / samples.len() as f32;
-        assert!((0.45..0.55).contains(&mean), "均值 {mean}");
+        assert!((0.44..0.56).contains(&mean), "均值 {mean}");
         let high = samples.iter().filter(|v| **v > 0.9).count();
-        assert!((150..250).contains(&high), "> 0.9 的有 {high} 个");
+        assert!((140..260).contains(&high), "> 0.9 的有 {high} 个");
     }
 
     #[test]

@@ -14,7 +14,9 @@ export interface VoiceSettings {
   voice: string
   style: string
   moodStyle: boolean
+  /** 播放倍速（不保持音高：快一点就高一点） */
   speed: number
+  keepPitch: boolean
   speakChat: boolean
   speakLines: boolean
 }
@@ -36,6 +38,8 @@ export interface ChatSettings {
   lines: LineSettings
 }
 export interface ActionInfo { id: string; name: string; defaultLines: string[] }
+/** 与 core/scheduler.rs 的 Timer 一致；focus 非空 = 专注段，头顶有倒计时 */
+export interface TimerInfo { id: string; label: string; dueAt: number; repeatMs: number | null; focus?: { startedAt: number; target: string | null } | null }
 export interface TtsStatus { connected: boolean; endpoint: string; voices: string[]; error: string | null }
 export interface ChatMessage {
   id: string
@@ -52,9 +56,11 @@ export interface ModelStatus { connected: boolean; models: string[]; error: stri
 export interface DesktopSettings { size: number; alwaysOnTop: boolean }
 export interface StreamEvent { requestId: string; delta: string; done: boolean; text?: string }
 
+/** 与 tts.rs 的 NEURO_STYLE / VoiceSettings::default 一致 */
+export const NEURO_STYLE = '语气平稳、起伏小，节奏偏快，音调偏高，像轻快的电子少女音 / flat calm intonation, quick pace, slightly high pitch, light synthetic girl voice'
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
-  enabled: true, endpoint: 'http://127.0.0.1:8090', voice: 'serena', style: '', moodStyle: true, speed: 1,
-  speakChat: true, speakLines: true,
+  enabled: true, endpoint: 'http://127.0.0.1:8090', voice: 'vivian', style: NEURO_STYLE, moodStyle: false, speed: 1.12,
+  keepPitch: false, speakChat: true, speakLines: true,
 }
 export const DEFAULT_LINE_SETTINGS: LineSettings = { enabled: true, mode: 'fixed', minGapSec: 45, actions: {} }
 

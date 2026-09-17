@@ -476,7 +476,10 @@ fn reply_prefix(name: &str) -> String { format!("{name}：") }
 /// 模型偶尔会在说完话之后拖出一段元注释（「（注意：…）」「我需要…」）或 `<think>`。
 /// 逐行扫，碰到第一行像旁白的就从那里截断；名字前缀重复了也去掉
 fn clean_reply(raw: &str, name: &str) -> String {
-    let mut text = raw.trim_start();
+    // qwen3.x 在 think=false 下偶尔还是会先吐一个空的 <think></think>；
+    // 以前把 <think> 当停止词，模型一开口就被截成空回答。现在整段抠掉再往下走
+    let without_think = strip_think(raw);
+    let mut text = without_think.trim_start();
     for prefix in [reply_prefix(name), format!("{name}:")] {
         if let Some(rest) = text.strip_prefix(prefix.as_str()) { text = rest.trim_start(); }
     }
@@ -486,7 +489,43 @@ fn clean_reply(raw: &str, name: &str) -> String {
         if !kept.is_empty() { kept.push('\n'); }
         kept.push_str(line);
     }
-    kept.trim().to_string()
+    // 旁白标记贴在句尾（模型学着用户消息的格式）也截掉
+    let kept = match kept.find("[旁白") { Some(i) => kept[..i].to_string(), None => kept };
+    drop_open_paren_tail(kept.trim()).trim().to_string()
+}
+
+/// 结尾一个没闭合的括号（「……我都准备好啦！\n\n(好奇」）是模型开了个动作描写就停了，
+/// 去掉它剩下的话是完整的；整句都在括号里就留着，别删成空
+fn drop_open_paren_tail(text: &str) -> &str {
+    let open = text.rfind(['(', '（']);
+    let Some(i) = open else { return text };
+    let tail = &text[i..];
+    if tail.contains([')', '）']) {
+        return text;
+    }
+    let head = text[..i].trim_end();
+    if head.is_empty() { text } else { head }
+}
+
+/// 去掉 `<think>…</think>`；没闭合的从 `<think>` 起全扔
+fn strip_think(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find("<think>") {
+        out.push_str(&rest[..start]);
+        match rest[start..].find("</think>") {
+            Some(end) => rest = &rest[start + end + "</think>".len()..],
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out.replace("</think>", "")
+}
+
+/// 一句话有没有说完：没有句末标点就是被截断了（num_predict 到头 / 停止词）
+fn ends_cleanly(text: &str) -> bool {
+    text.trim_end().chars().last().is_some_and(|c| matches!(c,
+        '。' | '！' | '？' | '!' | '?' | '…' | '～' | '~' | '.' | '）' | ')' | '」' | '"' | '”' | '嘛' | '呀' | '啦' | '呢' | '吧' | '哦'))
 }
 
 /// 这一行是模型对自己说的话，不是角色说的话？
@@ -508,6 +547,10 @@ fn looks_like_aside(line: &str) -> bool {
 
 /// Include only complete pairs, excluding failed/cancelled/rejected answers.
 /// A user's correction replaces the earlier answer for future context as well.
+/// 上下文最多带这么多轮。9B 模型的上下文越长越容易在句中提前结束（EOS），
+/// 而且十二轮之前的闲聊对眼下这句几乎没帮助
+const MAX_CONTEXT_PAIRS: usize = 8;
+
 fn build_prompt(settings: &ChatSettings, memories: &str, history: &[ChatMessage], text: &str, now: &Situation) -> Vec<ModelMessage> {
     let mut pairs: Vec<(ModelMessage, ModelMessage)> = Vec::new();
     let mut user: Option<&ChatMessage> = None;
@@ -515,17 +558,28 @@ fn build_prompt(settings: &ChatSettings, memories: &str, history: &[ChatMessage]
         if message.role == "user" { user = Some(message); continue; }
         let Some(previous) = user.take() else { continue };
         if message.status != "complete" || (message.rating.as_deref() == Some("down") && message.corrected_text.is_none()) { continue; }
+        // 历史里的回答再过一遍清理：模型会模仿上下文，一条以「[旁白」收尾的旧回答
+        // 就能教会它下一句也这么截断
+        let answer = clean_reply(&message.corrected_text.clone().unwrap_or_else(|| message.content.clone()), &settings.persona.name);
+        if answer.is_empty() { continue; }
         pairs.push((
             ModelMessage { role: "user".into(), content: previous.content.clone() },
-            ModelMessage { role: "assistant".into(), content: message.corrected_text.clone().unwrap_or_else(|| message.content.clone()) },
+            ModelMessage { role: "assistant".into(), content: answer },
         ));
     }
+    // 同一句话问了好几遍（「醒醒」「醒醒」「醒醒」）只留最后一次：重复的上下文会让模型
+    // 学着复读，然后在句中放弃——实测五个一样的问题连着放，回答有一半说到一半就停
     let mut used = 0;
     let mut recent = Vec::new();
-    for pair in pairs.into_iter().rev().take(12) {
+    let mut seen: Vec<String> = Vec::new();
+    for pair in pairs.into_iter().rev() {
+        if recent.len() >= MAX_CONTEXT_PAIRS { break; }
+        let key = pair.0.content.trim().to_string();
+        if seen.contains(&key) { continue; }
         let count = pair.0.content.chars().count() + pair.1.content.chars().count();
         if used + count > MAX_CONTEXT_CHARS { break; }
         used += count;
+        seen.push(key);
         recent.push(pair);
     }
     let mut result = vec![ModelMessage { role: "system".into(), content: system_prompt(settings, memories, now) }];
@@ -626,9 +680,15 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
         Some(Ok(())) => ("complete", None),
         Some(Err(error)) => ("error", Some(error)),
     };
+    let raw = output.clone();
     let mut output = clean_reply(&output, &settings.persona.name);
     if status == "complete" && output.is_empty() {
         error = Some("模型这次没有进入角色，请再试一次或换个说法。".into());
+    }
+    if status == "complete" && !output.is_empty() && !ends_cleanly(&output) {
+        // 想知道是被哪个停止词截的：RUST_LOG=vpet_lib=debug 启动就能看到原文
+        log::debug!("回答没说完就停了，原文：{raw:?}");
+        output.push('…');
     }
     // 使唤已经处理完了：模型没回上话（没起来 / 出错 / 没进角色）就用判定自带的那句，
     // 别让「她明明去玩了」配上一条红色的错误
@@ -661,6 +721,17 @@ fn handle_intent(app: &AppHandle, i: &Intent) -> (String, Option<String>) {
             match crate::request_action_quiet(app, target.clone(), *minutes) {
                 Some(v) if v.obey => {
                     let m = v.minutes.unwrap_or(0.0);
+                    // 你亲口说了多久，就在她头顶挂个倒计时；没说的话是她自己的一轮，不用盯着
+                    if minutes.is_some() {
+                        let sched = app.state::<std::sync::Mutex<crate::core::scheduler::Scheduler>>();
+                        let label = format!("{} {:.0} 分钟", v.action, m);
+                        let timer = sched.lock().ok().map(|mut sc| {
+                            let t = sc.add_focus(&label, (m * 60_000.0) as i64, Some(target.clone()), crate::now_ms());
+                            crate::save_timers(app, &sc);
+                            t
+                        });
+                        if let Some(t) = timer { let _ = app.emit("focus:started", &t); }
+                    }
                     let note = format!(
                         "你已经答应了，此刻正动身去「{}」，大约会做 {:.0} 分钟。用自己的话简短回应，别念时长。",
                         v.action, m
@@ -683,6 +754,27 @@ fn handle_intent(app: &AppHandle, i: &Intent) -> (String, Option<String>) {
                     (note, Some(v.say))
                 }
                 None => (format!("用户刚才让你{what}，但你没听明白要做什么。"), None),
+            }
+        }
+        Intent::Focus { minutes, target } => {
+            let (timer, verdict) = crate::start_focus(app, *minutes, target.clone(), None);
+            let label = timer.as_ref().map(|t| t.label.clone()).unwrap_or_else(|| "专注".into());
+            let note = match verdict {
+                Some(v) if v.obey => format!("你已经把「{label}」的倒计时挂在头顶开始走了，自己也动身去「{}」了。简短回应，别念时长。", v.action),
+                Some(v) => format!("倒计时「{label}」已经开始走了，但你没有答应一起去做（原因：{}），用自己的话委婉说明。", v.say),
+                None => format!("倒计时「{label}」已经开始走了，到点你会提醒用户。简短回应。"),
+            };
+            (note, Some(format!("好，{label}，开始计时啦。")))
+        }
+        Intent::Timer { minutes, label } => {
+            let m = *minutes;
+            let human = if m >= 60.0 { format!("{:.1} 小时", m / 60.0).replace(".0 ", " ") } else { format!("{m:.0} 分钟") };
+            match crate::create_timer(app.clone(), format!("{m}m"), Some(label.clone()), Some(false)) {
+                Ok(_) => (
+                    format!("你已经记下了：{human}后提醒用户「{label}」。简短回应，确认一下就好。"),
+                    Some(format!("好，{human}后我提醒你「{label}」。")),
+                ),
+                Err(e) => (format!("你想设提醒但没设成（{e}）。"), None),
             }
         }
         Intent::Bias { tag, weight } => {
@@ -738,6 +830,7 @@ async fn limited_body(mut response: reqwest::Response, limit: usize) -> Result<V
 struct OllamaChunk {
     #[serde(default)] message: Option<OllamaMessage>,
     #[serde(default)] done: bool,
+    #[serde(default)] done_reason: Option<String>,
     #[serde(default)] error: Option<String>,
 }
 
@@ -754,6 +847,11 @@ fn consume_line(line: &[u8], output: &mut String, on_delta: &mut impl FnMut(&str
         if output.len() + message.content.len() > MAX_OUTPUT_BYTES { return Err("回答达到长度上限，已停止生成。".into()); }
         if !message.content.is_empty() { output.push_str(&message.content); on_delta(&message.content); }
     }
+    // 被 num_predict 截断的话补个省略号，别让一句话戛然而止
+    if data.done && data.done_reason.as_deref() == Some("length") && !ends_cleanly(output) {
+        output.push('…');
+        on_delta("…");
+    }
     Ok(data.done)
 }
 
@@ -768,8 +866,9 @@ async fn generate_with(client: &Client, settings: &ChatSettings, prompt: &[Model
             "keep_alive": "10m",
             // 说完就停：别替用户接话，也别在正文后面开一段 <think>
             "options": { "temperature": settings.temperature, "num_ctx": 8192, "num_predict": num_predict,
-                         // 使唤的旁白贴在用户消息后面，模型偶尔会学着在自己的话后面也接一段
-                         "stop": ["用户：", "\n用户", "<think>", "</think>", "[旁白", "\n旁白"] }
+                         // 使唤的旁白贴在用户消息后面，模型偶尔会学着在自己的话后面也接一段。
+                         // <think> 不当停止词：模型一开口就吐一个空 think 块的话会被截成空回答，clean_reply 负责抠
+                         "stop": ["用户：", "\n用户", "[旁白", "\n旁白"] }
         })).send().await.map_err(network_error)?;
     if !response.status().is_success() {
         let status = response.status();
@@ -920,6 +1019,42 @@ mod tests {
         assert_eq!(deltas, ["你好", "!"]);
         assert!(consume_line(b"invalid", &mut output, &mut |_| {}).is_err());
         assert!(consume_line(br#"{"error":"model missing"}"#, &mut output, &mut |_| {}).unwrap_err().contains("model missing"));
+        let mut cut = String::from("我有点困，但既然主");
+        assert!(consume_line(br#"{"message":{"content":""},"done":true,"done_reason":"length"}"#, &mut cut, &mut |_| {}).unwrap());
+        assert_eq!(cut, "我有点困，但既然主…");
+    }
+
+    #[test]
+    fn repeated_questions_keep_only_the_latest_pair() {
+        let mut history = Vec::new();
+        for i in 0..5 {
+            history.push(message(format!("u{i}"), "user", "醒醒".into(), "model", "complete"));
+            history.push(message(format!("a{i}"), "assistant", format!("第{i}次回答。"), "model", "complete"));
+        }
+        history.push(message("u9".into(), "user", "在吗".into(), "model", "complete"));
+        history.push(message("a9".into(), "assistant", "在。".into(), "model", "complete"));
+        let prompt = build_prompt(&ChatSettings::default(), "", &history, "醒醒", &Situation::default());
+        // system + (醒醒, 第4次) + (在吗, 在) + 当前
+        assert_eq!(prompt.len(), 6, "{prompt:?}");
+        assert_eq!(prompt[2].content, "第4次回答。");
+        // 上限八轮
+        let mut long = Vec::new();
+        for i in 0..20 {
+            long.push(message(format!("u{i}"), "user", format!("问{i}"), "model", "complete"));
+            long.push(message(format!("a{i}"), "assistant", format!("答{i}。"), "model", "complete"));
+        }
+        let prompt = build_prompt(&ChatSettings::default(), "", &long, "现在", &Situation::default());
+        assert_eq!(prompt.len(), 1 + MAX_CONTEXT_PAIRS * 2 + 1);
+    }
+
+    #[test]
+    fn history_answers_are_cleaned_before_reuse() {
+        let history = vec![
+            message("u1".into(), "user", "去玩吧".into(), "model", "complete"),
+            message("a1".into(), "assistant", "好的主人，我去啦～\n\n[旁白：你已经答应了，此刻正".into(), "model", "complete"),
+        ];
+        let prompt = build_prompt(&ChatSettings::default(), "", &history, "在吗", &Situation::default());
+        assert_eq!(prompt[2].content, "好的主人，我去啦～");
     }
 
     #[test]
@@ -934,6 +1069,14 @@ mod tests {
         assert_eq!(clean_reply("（开心地拍手）太好了！\n（歪头看你）然后呢？", "萝莉斯"), "（开心地拍手）太好了！\n（歪头看你）然后呢？");
         assert_eq!(clean_reply("首先，用户说在吗，我需要回应……", "萝莉斯"), "");
         assert_eq!(clean_reply("好的主人，我去啦～\n \n[旁白：你已经答应了", "萝莉斯"), "好的主人，我去啦～");
+        assert_eq!(clean_reply("<think>\n\n</think>\n\n萝莉斯：在呀。", "萝莉斯"), "在呀。");
+        assert_eq!(clean_reply("在呀。<think>要不要", "萝莉斯"), "在呀。");
+        assert_eq!(clean_reply("好的主人，我去啦～ [旁白：你已经答应了", "萝莉斯"), "好的主人，我去啦～");
+        assert!(ends_cleanly("我有点困，但既然主人叫我了。"));
+        assert!(!ends_cleanly("我有点困，但既然主"));
+        assert_eq!(clean_reply("我都准备好啦！\n\n(好奇", "萝莉斯"), "我都准备好啦！");
+        assert_eq!(clean_reply("（歪头）在呀。", "萝莉斯"), "（歪头）在呀。");
+        assert_eq!(clean_reply("（歪头", "萝莉斯"), "（歪头");
         assert_eq!(clean_reply("  \n", "萝莉斯"), "");
     }
 

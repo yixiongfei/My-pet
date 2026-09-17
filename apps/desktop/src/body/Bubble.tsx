@@ -1,83 +1,60 @@
-import { useEffect, useRef, useState } from 'react'
-
-const MAX_LINES = 3
-/** 与下面 font 简写里的行高保持一致 */
-const LINE_HEIGHT = 1.6
+/** 最多显示几行；再多就在末尾打省略号。真正能放几行还要看头顶那块地方有多高 */
+const MAX_LINES = 7
+/** 正文行高（px），和下面 font 的 1.55 倍行距对应 */
+const LINE_PX = 14 * 1.55
+/** 名字行 + 上下内边距 + 尾巴，大约这么高 */
+const CHROME_PX = 52
+/** 流式输出时正文超过这么多字就只显示尾巴——新字要看得见 */
+const STREAM_TAIL_CHARS = 120
 
 export interface BubbleProps {
   name: string
   text: string
-  /** 还在流式输出中：显示光标，且不自动收起 */
+  /** 还在流式输出中：显示光标，看尾巴不看头 */
   streaming: boolean
-  onClose: () => void
+  /** 头顶区的高度（px）：气泡不能比它高，否则名字会被顶出窗口 */
+  maxHeight?: number
 }
 
 /**
- * 说话气泡。贴着窗口底部向上生长，盖在宠物身上——与原版
- * legacy/VPet-Simulator.Core/Display/MessageBar.xaml 一致（500×500 的层 + 底对齐）。
- * 超过 MAX_LINES 行折叠，点「展开」看全文。
+ * 说话气泡。浮在立绘头顶（窗口上方那块 HEAD_ROOM 区域的底部），尾巴指向头。
+ * 这块区域对鼠标是穿透的，所以气泡没有任何按钮：超出的部分打省略号，
+ * 完整内容在对话窗口里。
  */
-export function Bubble({ name, text, streaming, onClose }: BubbleProps) {
-  const textRef = useRef<HTMLDivElement>(null)
-  const [expanded, setExpanded] = useState(false)
-  const [clamped, setClamped] = useState(false)
-
-  // 用 maxHeight 裁而不是 -webkit-line-clamp：后者在布局层就截断了内容，
-  // scrollHeight 会等于 clientHeight，溢出根本测不出来。
-  useEffect(() => {
-    const el = textRef.current
-    if (!el || expanded) return
-    setClamped(el.scrollHeight > el.clientHeight + 1)
-  }, [text, expanded])
-
-  // 换一段话就收回展开状态
-  useEffect(() => setExpanded(false), [name])
-
+export function Bubble({ name, text, streaming, maxHeight }: BubbleProps) {
+  const long = text.length > STREAM_TAIL_CHARS
+  const shown = streaming && long ? '…' + text.slice(-STREAM_TAIL_CHARS) : text
+  const fit = maxHeight ? Math.floor((maxHeight - CHROME_PX) / LINE_PX) : MAX_LINES
+  const lines = Math.max(2, Math.min(MAX_LINES, fit))
   return (
-    <div
-      style={{
-        padding: '12px 14px', borderRadius: 14,
-        background: 'rgba(28,28,32,.88)', color: '#f4f4f5',
-        font: '15px/1.6 system-ui, "Microsoft YaHei", sans-serif',
-        boxShadow: '0 6px 24px rgba(0,0,0,.35)', backdropFilter: 'blur(6px)',
-      }}
-      onDoubleClick={onClose}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontWeight: 700, color: '#ffd9a0' }}>{name}</span>
-        <button
-          onClick={onClose}
-          title="收起（Esc）"
-          style={{
-            marginLeft: 'auto', border: 0, background: 'transparent', cursor: 'pointer',
-            color: '#9b9ba3', font: '14px system-ui, sans-serif', padding: '0 2px',
-          }}
-        >
-          ×
-        </button>
-      </div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
       <div
-        ref={textRef}
-        style={
-          expanded
-            ? { maxHeight: 300, overflowY: 'auto', whiteSpace: 'pre-wrap' }
-            : { maxHeight: `${MAX_LINES * LINE_HEIGHT}em`, overflow: 'hidden', whiteSpace: 'pre-wrap' }
-        }
+        style={{
+          maxWidth: '94%', minWidth: 120, boxSizing: 'border-box',
+          padding: '9px 13px 10px', borderRadius: 16,
+          background: 'rgba(28,28,32,.9)', color: '#f4f4f5',
+          font: `${long ? 13 : 14}px/1.55 system-ui, "Microsoft YaHei", sans-serif`,
+          boxShadow: '0 6px 24px rgba(0,0,0,.35)', backdropFilter: 'blur(6px)',
+        }}
       >
-        {text}
-        {streaming && <span style={{ opacity: 0.55 }}>▍</span>}
-      </div>
-      {(clamped || expanded) && (
-        <button
-          onClick={() => setExpanded((v) => !v)}
+        <div style={{ fontWeight: 700, color: '#ffd9a0', fontSize: 12, marginBottom: 2, letterSpacing: '.2px' }}>{name}</div>
+        <div
           style={{
-            marginTop: 4, border: 0, background: 'transparent', cursor: 'pointer',
-            color: '#8ab4f8', font: '13px system-ui, sans-serif', padding: 0,
+            display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: lines,
+            overflow: 'hidden', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           }}
         >
-          {expanded ? '收起' : '展开'}
-        </button>
-      )}
+          {shown}
+          {streaming && <span style={{ opacity: 0.55 }}>▍</span>}
+        </div>
+      </div>
+      {/* 指向头顶的小尾巴 */}
+      <div
+        style={{
+          width: 14, height: 14, marginTop: -7, transform: 'rotate(45deg)',
+          background: 'rgba(28,28,32,.9)', borderRadius: 2,
+        }}
+      />
     </div>
   )
 }

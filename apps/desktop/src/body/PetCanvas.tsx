@@ -2,6 +2,7 @@ import { Verdict } from '@vpet/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimationPlayer } from './AnimationPlayer'
 import { Bubble } from './Bubble'
+import { Countdown } from './Countdown'
 import { subscribe } from './events'
 import { HitMask } from './hitMask'
 import { Interaction } from './interaction'
@@ -16,10 +17,15 @@ import { toLogical } from './touch'
 /** 话在念的时候气泡不收；念完再留一会儿。合成加播放最长也就这么久，兜底 */
 const SPEAKING_HOLD_MS = 45_000
 const AFTER_SPEECH_MS = 2_000
+/** 立绘上方留给气泡 / 倒计时的高度，按立绘边长算。**必须和 src-tauri lib.rs 的 HEAD_ROOM 一致**（窗口高 = 宽 × 1.6） */
+const HEAD_ROOM = 0.6
+
+/** 与 core/scheduler.rs 的 Timer 对应；focus 非空才在头顶显示 */
+interface FocusTimer { id: string; label: string; dueAt: number; focus?: { startedAt: number; target: string | null } | null }
 
 /** Core 那边的 ChatSettings 里我们只关心这几个开关 */
 interface VoiceSettingsPayload {
-  voice?: { enabled?: boolean; speakChat?: boolean; speakLines?: boolean }
+  voice?: { enabled?: boolean; speakChat?: boolean; speakLines?: boolean; speed?: number; keepPitch?: boolean }
   persona?: { name?: string }
 }
 
@@ -39,6 +45,7 @@ export function PetCanvas() {
   const streamRef = useRef<{ id: string; text: string; spoken: number } | null>(null)
   const [hovered, setHovered] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [focus, setFocus] = useState<FocusTimer | null>(null)
 
   const scheduleHide = useCallback((ms: number) => {
     window.clearTimeout(hideTimer.current)
@@ -66,6 +73,8 @@ export function PetCanvas() {
       enabled: s.voice?.enabled ?? true,
       speakChat: s.voice?.speakChat ?? true,
       speakLines: s.voice?.speakLines ?? true,
+      speed: s.voice?.speed ?? 1.12,
+      keepPitch: s.voice?.keepPitch ?? false,
     }
     if (s.persona?.name) setName(s.persona.name)
   }, [])
@@ -170,9 +179,17 @@ export function PetCanvas() {
           if (line?.text) announce(line.text, line.spoken === false ? 'none' : 'line')
         }))
         stops.push(subscribe('timer:fired', (payload) => {
-          const label = (payload as { label?: string } | null)?.label
-          if (label) announce('⏰ ' + label)
+          const t = payload as FocusTimer | null
+          if (!t?.label) return
+          announce(t.focus ? `⏰ 「${t.label}」到啦！` : '⏰ ' + t.label)
         }))
+        // 头顶的倒计时：番茄钟 / 「学习一个小时」。重启后接着显示
+        void invokeCore<FocusTimer | null>('get_focus').then((t) => { if (!disposed) setFocus(t?.focus ? t : null) })
+        stops.push(subscribe('focus:started', (payload) => {
+          const t = payload as FocusTimer | null
+          setFocus(t?.focus ? t : null)
+        }))
+        stops.push(subscribe('focus:ended', () => setFocus(null)))
         stops.push(subscribe('pet:said', (payload) => {
           const result = Verdict.safeParse(payload)
           if (result.success) announce(result.data.say)
@@ -220,29 +237,44 @@ export function PetCanvas() {
     speechRef.current?.interrupt()
   }
 
+  // 窗口 = 上面一段头顶区（气泡、倒计时，鼠标穿透）+ 下面一个正方形的立绘区。
+  // 两块的比例由 Rust 定（窗口高 = 宽 × (1 + HEAD_ROOM)），这里只是按同一个比例分
   return (
-    <div
-      style={{ width: '100%', height: '100%', position: 'relative', touchAction: 'none', cursor: dragging ? 'grabbing' : hovered ? 'pointer' : 'default' }}
-      title="单击聊天 · 按住拖动 · 右键打开设置"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={() => interactionRef.current?.onPointerUp(true)}
-      onLostPointerCapture={() => interactionRef.current?.onPointerUp(true)}
-      onPointerLeave={() => setHovered(false)}
-      onContextMenu={(event) => { event.preventDefault(); void openSettingsPanel() }}
-    >
-      <canvas ref={canvasRef} />
-      {bubble && (
-        <div style={{ position: 'absolute', left: 8, right: 8, bottom: 8, pointerEvents: 'none' }}>
-          <Bubble name={name} text={bubble} streaming={streaming} onClose={closeBubble} />
-        </div>
-      )}
-      {error && (
-        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', padding: 24, textAlign: 'center', font: '14px/1.6 system-ui, sans-serif', color: '#fff', background: 'rgba(0,0,0,.72)', borderRadius: 16 }}>
-          <div><div style={{ fontSize: 28, marginBottom: 8 }}>VPet</div>{error}</div>
-        </div>
-      )}
+    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'relative', flex: 'none', height: `calc(100vw * ${HEAD_ROOM})`, pointerEvents: 'none' }}>
+        {focus?.focus && (
+          <div style={bubble
+            ? { position: 'absolute', top: 2, right: 6, zIndex: 2 }
+            : { position: 'absolute', top: 4, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}
+          >
+            <Countdown label={focus.label} startedAt={focus.focus.startedAt} dueAt={focus.dueAt} compact={!!bubble} />
+          </div>
+        )}
+        {bubble && (
+          <div style={{ position: 'absolute', left: 6, right: 6, bottom: 2 }}>
+            <Bubble name={name} text={bubble} streaming={streaming} maxHeight={window.innerWidth * HEAD_ROOM - 6} />
+          </div>
+        )}
+      </div>
+      <div
+        style={{ position: 'relative', width: '100vw', height: '100vw', touchAction: 'none', cursor: dragging ? 'grabbing' : hovered ? 'pointer' : 'default' }}
+        title="单击聊天 · 按住拖动 · 右键打开设置"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => interactionRef.current?.onPointerUp(true)}
+        onLostPointerCapture={() => interactionRef.current?.onPointerUp(true)}
+        onPointerLeave={() => setHovered(false)}
+        onContextMenu={(event) => { event.preventDefault(); void openSettingsPanel() }}
+        onDoubleClick={closeBubble}
+      >
+        <canvas ref={canvasRef} />
+        {error && (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', padding: 24, textAlign: 'center', font: '14px/1.6 system-ui, sans-serif', color: '#fff', background: 'rgba(0,0,0,.72)', borderRadius: 16 }}>
+            <div><div style={{ fontSize: 28, marginBottom: 8 }}>VPet</div>{error}</div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

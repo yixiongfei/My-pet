@@ -18,7 +18,14 @@ pub enum Intent {
     Do { target: String, minutes: Option<f32> },
     /// 持续倾向：多做（正）/ 少做（负），走 `Event::SetBias`
     Bias { tag: String, weight: f32 },
+    /// 专注一段时间：「设个番茄钟，学习一个小时」——头顶出倒计时，期间她去做 `target`
+    Focus { minutes: f32, target: Option<String> },
+    /// 单纯的提醒：「十分钟后叫我」
+    Timer { minutes: f32, label: String },
 }
+
+/// 没说多久的番茄钟
+pub const DEFAULT_FOCUS_MIN: f32 = 25.0;
 
 /// 中文动词 → 目标。**顺序有讲究**：长的在前（「玩游戏」先于「玩」），
 /// 否则「打游戏」会被「打工」抢走
@@ -74,10 +81,61 @@ pub fn parse(text: &str) -> Option<Intent> {
     if t.is_empty() || t.chars().count() > 60 {
         return None; // 长篇大论不会是一句命令
     }
-    parse_bias_zh(&t)
+    parse_focus(&t)
+        .or_else(|| parse_timer(&t))
+        .or_else(|| parse_bias_zh(&t))
         .or_else(|| parse_do_zh(&t))
         .or_else(|| parse_bias_en(&t))
         .or_else(|| parse_do_en(&t))
+}
+
+/// 「帮我设个番茄钟，学习一个小时吧」「专注 50 分钟」「start a 30 min pomodoro」
+fn parse_focus(t: &str) -> Option<Intent> {
+    let s = strip_punct(t);
+    if !["番茄钟", "番茄", "专注", "pomodoro", "focus session", "focus for", "focus mode", "deep work"].iter().any(|k| s.contains(k)) {
+        return None;
+    }
+    if s.contains("取消") || s.contains("停") || s.contains("cancel") || s.contains("stop") {
+        return None; // 「停掉番茄钟」交给别的地方，这里只管开
+    }
+    let (minutes, _) = duration_zh(&s);
+    let minutes = minutes.or_else(|| duration_en(t).0).unwrap_or(DEFAULT_FOCUS_MIN);
+    // 期间让她干什么：句子里提到学习 / 工作就跟着做，没提就只是计时
+    let target = find_verb_zh(&s)
+        .map(|(_, _, tag)| tag)
+        .filter(|tag| ["study", "work", "play", "rest"].contains(tag))
+        .or_else(|| {
+            if t.contains("study") || t.contains("read") { Some("study") }
+            else if t.contains("work") { Some("work") }
+            else { None }
+        })
+        .map(String::from);
+    Some(Intent::Focus { minutes: minutes.clamp(1.0, 240.0), target })
+}
+
+/// 「十分钟后叫我」「提醒我 20 分钟后喝水」「remind me in 15 minutes to stretch」
+fn parse_timer(t: &str) -> Option<Intent> {
+    let s = strip_punct(t);
+    let zh_hit = ["提醒我", "叫我", "闹钟", "计时", "倒计时", "定个时"].iter().any(|k| s.contains(k));
+    let en_hit = t.contains("remind me") || t.contains("timer") || t.contains("alarm") || t.contains("wake me");
+    if !zh_hit && !en_hit {
+        return None;
+    }
+    let (minutes, rest) = duration_zh(&s);
+    let (minutes, rest) = match minutes {
+        Some(m) => (m, rest),
+        None => {
+            let (m, rest_en) = duration_en(t);
+            (m?, rest_en)
+        }
+    };
+    // 标签：去掉「提醒我」「后」「叫我」这些骨架，剩下的就是要提醒的事
+    let mut label = rest;
+    for k in ["提醒我", "叫我一下", "叫我", "闹钟", "定个时", "计时", "倒计时", "帮我", "请", "记得", "后", "之后", "到了", "remind me", "in ", "to ", "set a", "set ", "timer", "alarm", "for", "please", "wake me up", "wake me"] {
+        label = label.replace(k, " ");
+    }
+    let label = label.trim_matches(|c: char| c.is_whitespace() || matches!(c, '，' | ',' | '吧' | '哦' | '啊' | '呀' | '~')).trim().to_string();
+    Some(Intent::Timer { minutes: minutes.clamp(0.5, 24.0 * 60.0), label: if label.is_empty() { "提醒".into() } else { label } })
 }
 
 /// 全角标点 → 半角，去掉空白（中文不靠空格分词），统一小写
@@ -455,6 +513,22 @@ mod tests {
         assert_eq!(parse("多睡会儿"), None);
         // 「别玩了」不是「去玩」
         assert_eq!(go("别玩了"), None);
+    }
+
+    #[test]
+    fn 番茄钟和提醒() {
+        assert_eq!(parse("帮我设个番茄钟，学习一个小时吧"), Some(Intent::Focus { minutes: 60.0, target: Some("study".into()) }));
+        assert_eq!(parse("来个番茄钟"), Some(Intent::Focus { minutes: DEFAULT_FOCUS_MIN, target: None }));
+        assert_eq!(parse("专注工作 50 分钟"), Some(Intent::Focus { minutes: 50.0, target: Some("work".into()) }));
+        assert_eq!(parse("start a 30 minute pomodoro"), Some(Intent::Focus { minutes: 30.0, target: None }));
+        assert_eq!(parse("十分钟后叫我"), Some(Intent::Timer { minutes: 10.0, label: "提醒".into() }));
+        assert_eq!(parse("提醒我 20 分钟后喝水"), Some(Intent::Timer { minutes: 20.0, label: "喝水".into() }));
+        assert_eq!(parse("半小时后提醒我去接人"), Some(Intent::Timer { minutes: 30.0, label: "去接人".into() }));
+        assert_eq!(parse("remind me in 15 minutes to stretch"), Some(Intent::Timer { minutes: 15.0, label: "stretch".into() }));
+        // 没说多久的提醒认不出来，交给闲聊
+        assert_eq!(parse("提醒我一下"), None);
+        // 「去学习一小时」还是使唤，不是番茄钟
+        assert_eq!(parse("去学习一个小时"), Some(Intent::Do { target: "study".into(), minutes: Some(60.0) }));
     }
 
     #[test]

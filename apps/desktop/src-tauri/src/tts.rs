@@ -26,11 +26,12 @@ const MAX_NEW_FRAMES: u32 = 1500;
 const CACHE_MAX_FILES: usize = 400;
 const SYNTH_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Qwen3-TTS CustomVoice 自带的九个声音。萝莉斯是个温柔又好奇的少女，
-/// 默认用 serena（温暖柔和的年轻女声，中英文都行）；想活泼一点换 vivian
+/// Qwen3-TTS CustomVoice 自带的九个声音。默认 vivian（明亮的年轻女声）——
+/// 用户要的是 Neuro-sama 那种：起伏小、偏快、偏高、有点电子感；语气靠 instructions，
+/// 快和高靠 Body 播放时的 playbackRate（`speed`，不保持音高，所以快一点就高一点）
 pub const SPEAKERS: &[(&str, &str)] = &[
-    ("serena", "温柔的年轻女声（默认）"),
-    ("vivian", "明亮、带点俏皮的年轻女声"),
+    ("vivian", "明亮、带点俏皮的年轻女声（默认）"),
+    ("serena", "温柔的年轻女声"),
     ("ono_anna", "轻快活泼的日系女声"),
     ("sohee", "温暖、情绪丰富的韩系女声"),
     ("uncle_fu", "低沉醇厚的大叔声"),
@@ -39,6 +40,9 @@ pub const SPEAKERS: &[(&str, &str)] = &[
     ("ryan", "有节奏感的英文男声"),
     ("aiden", "阳光的美式男声"),
 ];
+
+/// 默认语气：平稳少起伏、偏快偏高的电子少女音。中英文各写一遍，模型念英文时也照做
+pub const NEURO_STYLE: &str = "语气平稳、起伏小，节奏偏快，音调偏高，像轻快的电子少女音 / flat calm intonation, quick pace, slightly high pitch, light synthetic girl voice";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -50,10 +54,13 @@ pub struct VoiceSettings {
     pub voice: String,
     /// 基础语气说明，交给模型的 instructions，如「语气自然、亲切」。留空 = 不加
     pub style: String,
-    /// 按心情自动加语气：开心时轻快，状态差时有气无力
+    /// 按心情自动加语气：开心时轻快，状态差时有气无力。要平稳的电子音就关掉
     pub mood_style: bool,
-    /// 语速倍率
+    /// 播放倍速（Body 的 playbackRate）。tts-server 不做变速，所以在播放端做；
+    /// 不保持音高时快 12% 就高小半个音——正好是「偏快偏高」
     pub speed: f32,
+    /// 变速时保持音高（true = 只快不高）
+    pub keep_pitch: bool,
     /// 对话窗口里的回复也朗读
     pub speak_chat: bool,
     /// 动作台词、答应/拒绝、收礼这些桌面上的短句朗读
@@ -65,10 +72,11 @@ impl Default for VoiceSettings {
         Self {
             enabled: true,
             endpoint: DEFAULT_ENDPOINT.into(),
-            voice: "serena".into(),
-            style: String::new(),
-            mood_style: true,
-            speed: 1.0,
+            voice: "vivian".into(),
+            style: NEURO_STYLE.into(),
+            mood_style: false,
+            speed: 1.12,
+            keep_pitch: false,
             speak_chat: true,
             speak_lines: true,
         }
@@ -87,8 +95,8 @@ impl VoiceSettings {
         if self.style.chars().count() > 200 {
             return Err("语气说明最多 200 字。".into());
         }
-        if !self.speed.is_finite() || !(0.5..=2.0).contains(&self.speed) {
-            return Err("语速应在 0.5 到 2.0 之间。".into());
+        if !self.speed.is_finite() || !(0.7..=1.6).contains(&self.speed) {
+            return Err("语速应在 0.7 到 1.6 之间。".into());
         }
         Ok(self)
     }
@@ -167,9 +175,9 @@ fn is_emoji(c: char) -> bool {
 }
 
 /// 缓存键。FNV-1a：不追求抗碰撞，只要跨次启动稳定（`DefaultHasher` 不保证这一点）
-fn cache_key(voice: &str, instructions: &str, speed: f32, text: &str) -> String {
+fn cache_key(voice: &str, instructions: &str, text: &str) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in format!("{voice}|{instructions}|{speed:.2}|{text}").bytes() {
+    for b in format!("{voice}|{instructions}|{text}").bytes() {
         h ^= b as u64;
         h = h.wrapping_mul(0x0100_0000_01b3);
     }
@@ -218,7 +226,8 @@ pub async fn synthesize(app: &AppHandle, voice: &VoiceSettings, text: &str, mood
         return Err("这句话没有可以念的内容".into());
     }
     let instructions = voice.instructions(mood);
-    let key = cache_key(&voice.voice, &instructions, voice.speed, &text);
+    // 倍速在播放端做，不进缓存键：调语速不用重新合成
+    let key = cache_key(&voice.voice, &instructions, &text);
     let cached = cache_dir(app).map(|d| d.join(format!("{key}.wav")));
     if let Some(p) = cached.as_ref() {
         if let Ok(bytes) = std::fs::read(p) {
@@ -231,7 +240,6 @@ pub async fn synthesize(app: &AppHandle, voice: &VoiceSettings, text: &str, mood
         "input": text,
         "voice": voice.voice,
         "response_format": "wav",
-        "speed": voice.speed,
         "max_new_tokens": MAX_NEW_FRAMES,
     });
     if !instructions.is_empty() {
@@ -334,7 +342,7 @@ mod tests {
 
     #[test]
     fn 语气按心情拼接() {
-        let mut v = VoiceSettings::default();
+        let mut v = VoiceSettings { style: String::new(), mood_style: true, ..VoiceSettings::default() };
         assert_eq!(v.instructions(Some(Mood::Nomal)), "");
         assert_eq!(v.instructions(Some(Mood::Happy)), "用开心、轻快的语气说");
         v.style = "声音自然亲切".into();
@@ -342,6 +350,8 @@ mod tests {
         assert_eq!(v.instructions(Some(Mood::PoorCondition)), "声音自然亲切，用有点疲惫、低落的语气说");
         v.mood_style = false;
         assert_eq!(v.instructions(Some(Mood::Happy)), "声音自然亲切");
+        // 默认就是平稳的电子音，心情不掺和
+        assert_eq!(VoiceSettings::default().instructions(Some(Mood::Happy)), NEURO_STYLE);
     }
 
     #[test]
@@ -363,11 +373,10 @@ mod tests {
 
     #[test]
     fn 缓存键稳定且区分参数() {
-        let a = cache_key("serena", "", 1.0, "你好");
-        assert_eq!(a, cache_key("serena", "", 1.0, "你好"));
-        assert_ne!(a, cache_key("vivian", "", 1.0, "你好"));
-        assert_ne!(a, cache_key("serena", "开心", 1.0, "你好"));
-        assert_ne!(a, cache_key("serena", "", 1.2, "你好"));
+        let a = cache_key("serena", "", "你好");
+        assert_eq!(a, cache_key("serena", "", "你好"));
+        assert_ne!(a, cache_key("vivian", "", "你好"));
+        assert_ne!(a, cache_key("serena", "开心", "你好"));
         assert_eq!(a.len(), 16);
     }
 }

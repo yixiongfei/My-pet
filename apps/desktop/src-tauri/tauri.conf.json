@@ -16,7 +16,7 @@
         "label": "pet",
         "title": "VPet",
         "width": 500,
-        "height": 500,
+        "height": 800,
         "transparent": true,
         "decorations": false,
         "shadow": false,

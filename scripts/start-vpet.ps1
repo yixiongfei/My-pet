@@ -25,6 +25,15 @@ $env:OLLAMA_VULKAN = '1'
 $env:OLLAMA_IGPU_ENABLE = '1'
 $env:OLLAMA_KEEP_ALIVE = '30m'
 
+# Orphaned Ollama runners: when ollama.exe dies (crash, killed, machine sleep) its llama-server children can
+# outlive it and keep several GB of commit charge each. Two of them once pushed this PC to the page-file limit.
+Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'" | ForEach-Object {
+    if (-not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue)) {
+        Write-Host "Killing orphaned llama-server (pid $($_.ProcessId))"
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $ollamaReady = $false
 try { $null = Invoke-RestMethod 'http://127.0.0.1:11434/api/version' -TimeoutSec 2; $ollamaReady = $true } catch {}
 if (-not $ollamaReady -and (Test-Path -LiteralPath $ollamaExe)) {

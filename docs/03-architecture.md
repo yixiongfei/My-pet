@@ -20,72 +20,70 @@
 - Node sidecar 跑 Brain：多一个进程、打包复杂；`packages/brain` 零 DOM 依赖已经保留了这条退路。
 - LanceDB / Qdrant / Chroma：数据量（几千条笔记块 + 几千条记忆）远不需要独立向量服务；sqlite-vec 一个文件搞定。
 
-## 2. 进程与模块
+## 2. 进程与模块（现状，2026-09-18）
+
+> 本节按**已经落地**的代码写；§4 起的数据流和 Tool 协议仍是设计稿，未实现的部分在 [07](07-roadmap.md) 里标 ⬜。
+> 与最初设计最大的出入：**Brain 目前在 Rust 里**（`src-tauri/src/chat.rs`），走本机 Ollama，
+> 没有 tool calling——「使唤」「番茄钟」「提醒」是规则识别（`core/intent.rs`）后直接进 Core，
+> 再把结果写进系统提示的「此刻」一节让模型顺着说。`packages/brain` 还是空壳。
 
 ```
-┌──────────────────────────────── Tauri App（单进程）────────────────────────────────┐
-│                                                                                  │
-│   WebView: Pet Window            WebView: Panel Window (Inspector, 按需)          │
-│  ┌──────────────────────┐        ┌──────────────────────┐                        │
-│  │  Body (React)        │        │ 记忆 / 权限 / 审计   │                        │
-│  │  · AnimationPlayer   │        │ / 会话 历史          │                        │
-│  │  · Bubble / ChatBox  │        └──────────────────────┘                        │
-│  │  · TouchLayer        │                                                        │
-│  ├──────────────────────┤                                                        │
-│  │  Brain (TS, 无 UI)   │  ← packages/brain                                      │
-│  │  · AgentLoop         │                                                        │
-│  │  · ContextBuilder    │                                                        │
-│  │  · ModelProvider     │ ──── HTTPS ───→ OpenAI / Anthropic / Ollama            │
-│  │  · MemoryExtractor   │                                                        │
-│  └───────┬──────────────┘                                                        │
-│          │ invoke / listen（Tauri IPC）                                           │
-│  ┌───────▼──────────────────────────────────────────────────────────────────┐    │
-│  │  Core (Rust)                                                             │    │
-│  │  · PetStateMachine   · Scheduler(Timer/Pomodoro/Cron)  · Observer        │    │
-│  │  · ToolRegistry      · PermissionGate    · AuditLog    · RuleEngine      │    │
-│  │  · MemoryStore       · VectorIndex(sqlite-vec+FTS5)    · Indexer(vault)  │    │
-│  │  · Secrets(keyring)  · Settings                                          │    │
-│  └───────┬───────────────────────┬────────────────────┬─────────────────────┘    │
-│          │ rusqlite              │ notify(fs watch)   │ reqwest                  │
-│     vpet.db                 My-md/**/*.md        KB API :5174 · GitHub API       │
-└──────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────── Tauri App（单进程）──────────────────────────────┐
+│  WebView: pet（透明置顶、穿透）   WebView: chat（可贴边收起）  WebView: panel     │
+│  ┌──────────────────────────┐    ┌─────────────────────┐   ┌────────────────┐  │
+│  │ Body (React)             │    │ 对话记录 · 输入      │   │ 陪伴设置：显示 │  │
+│  │ · AnimationPlayer        │    │ 👍/👎/教她怎么回答  │   │ 个性 · 声音与  │  │
+│  │ · Interaction（摸/拖/说）│    │ 重新发送            │   │ 台词 · 模型 ·  │  │
+│  │ · Bubble（头顶气泡）     │    └─────────────────────┘   │ 礼物；调试面板 │  │
+│  │ · Countdown（倒计时环）  │                              └────────────────┘  │
+│  │ · Speech（按句念，TTS）  │                                                  │
+│  └────────────┬─────────────┘         invoke / listen（Tauri IPC）             │
+│  ┌────────────▼──────────────────────────────────────────────────────────────┐ │
+│  │ Core (Rust)                                                               │ │
+│  │ lib.rs    窗口/托盘/穿透命中/心跳/全部命令      dock.rs  对话窗贴边收起   │ │
+│  │ chat.rs   本机对话：角色卡 + 此刻 + 记忆 → Ollama 流式；反馈样本导出      │ │
+│  │ tts.rs    Qwen3-TTS 合成 + 缓存    lines.rs  动作台词（固定 / 模型即兴）  │ │
+│  │ core/     state_machine · actions(.toml) · obey · bias · intent           │ │
+│  │           scheduler(+专注段) · pomodoro · memory · embed · db · food · tools│ │
+│  └───────┬──────────────────┬──────────────────────┬─────────────────────────┘ │
+│     rusqlite            reqwest/ureq               reqwest                     │
+│     vpet.db          Ollama :11434（chat + embed）  tts-server :8090            │
+│     chat.sqlite3                                   (qwentts.cpp, 核显 Vulkan)   │
+└────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**边界规则**：
+**边界规则**（这几条已经在代码里守住了）：
 
-1. Body 只做渲染和输入；不含业务逻辑，不直接 invoke 工具。
-2. Brain 只做"理解 → 决定调用哪个工具 → 组织语言"；**不持有任何计时、状态、权限逻辑**。它调用工具的唯一方式是 `invoke("run_tool", …)`。
-3. Core 是唯一能碰文件系统、网络数据源、数据库的地方。所有工具的执行都在 Rust 侧（哪怕只是一个 HTTP GET），这样权限校验和审计只有一个入口。
-4. Brain 被动运行：只被两类东西唤醒——用户输入，或 Core 的 `agent:trigger` 事件（主动行为）。Brain 自己没有定时器。
+1. Body 只做渲染、输入和播放；数值怎么变、说什么话，都由 Core 决定后用事件推过来（`pet:state` `pet:line` `pet:said` `pet:gift` `focus:*` `chat-stream`）。
+2. **用户意志进入状态机只有一个入口**：`request_action` → 服从判定。对话里的「去玩会儿」也走这里，模型只是把结果说出来。
+3. Core 是唯一碰网络和数据库的地方。Ollama / tts-server 的地址都经 `local_endpoint` 校验，只接受本机。
+4. `reduce` 是纯函数：时间、随机数从外面喂，所以作息、保护期、服从概率全部有单元测试（247 个）。
 
-## 3. 目录结构
+## 3. 目录结构（现状）
 
 ```
-obsidian-pet/
-├── docs/                      本方案
-├── legacy/                    原 C# 项目（只读参考：状态公式、move 规则、LPS 解析）已确认（Q11）
-├── assets-src/                原始 PNG 帧 + vup.lps（git 里保留，不进安装包）
-├── scripts/
-│   └── build-assets.mjs       PNG → WebP + manifest.json + pet.json（见 05）
-├── packages/
-│   ├── shared/                zod schema：Tool / Event / PetState / Memory 类型，TS 与 Rust 共用的 JSON 契约
-│   └── brain/                 Agent 编排（纯 TS，无 React/DOM）
-├── apps/
-│   └── desktop/
-│       ├── src/               React：pet 窗口、panel 窗口
-│       ├── src-tauri/
-│       │   ├── src/
-│       │   │   ├── core/      state_machine.rs · scheduler.rs · pomodoro.rs · observer/ · rules.rs
-│       │   │   ├── tools/     registry.rs · permission.rs · audit.rs · builtin/ · http_manifest.rs
-│       │   │   ├── memory/    store.rs · vector.rs · indexer.rs · embedding/
-│       │   │   ├── db/        migrations/ · schema.rs
-│       │   │   ├── commands.rs   Tauri #[command] 集合
-│       │   │   └── events.rs     发往前端的事件定义
-│       │   ├── tools/kb.toml  声明式 HTTP 工具 manifest（知识库 API）
-│       │   └── tauri.conf.json
-│       └── public/pet/        构建产物：WebP 帧 + manifest.json（build-assets 生成，gitignore）
-└── personality.yaml           Character Card
+Vpet/
+├── docs/                       本方案（改代码要同步改这里）
+├── assets-src/                 原版美术，不入库（README 说明怎么放）
+├── scripts/                    build-assets.mjs · start-vpet.ps1 · setup-tts.ps1 · release.ps1
+├── packages/shared/            zod：PetState / Verdict / Memory / Manifest（TS 与 Rust 共用的契约）
+├── packages/brain/             占位（Brain 目前在 Rust 里）
+├── training/                   LoRA 脚本：用 👍 / 修订过的回答训练
+└── apps/desktop/
+    ├── index.html chat.html panel.html      三个窗口的入口
+    ├── src/body/               AnimationPlayer · Interaction · PetCanvas · Bubble · Countdown · speech · hitMask
+    ├── src/chat/               Chat.tsx · api.ts（IPC 类型）· companion.css
+    ├── src/panel/              CompanionSettings · VoiceSettingsTab · Panel（调试）
+    ├── src-tauri/actions.toml  动作表：数值 / 时段 / 门槛 / 台词
+    └── src-tauri/src/
+        ├── lib.rs              窗口 · 托盘 · 穿透命中 · 心跳 · 命令 · 记忆命令 · 专注段
+        ├── chat.rs             对话（设置 / 历史 / 系统提示 / 流式 / 使唤结果 / 训练样本）
+        ├── tts.rs  lines.rs  dock.rs  desktop_settings.rs
+        └── core/               state_machine · actions · obey · bias · intent · scheduler
+                                pomodoro · memory · embed · db · food · tools
 ```
+
+数据在 `%APPDATA%\dev.yixiongfei.vpet\`：`vpet.db`（状态流水、记忆、向量、计时器）、`chat.sqlite3`（对话与设置）、`desktop-settings.json`、`tts-cache/`。
 
 ## 4. 核心数据流
 

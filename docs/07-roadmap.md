@@ -35,16 +35,17 @@ Phase 8  打磨与发布            ─  v4
 
 > 结果：609 clips / 6181 帧全部转出（0 帧失败）；`default` 3 变体、`say/shining` 3 loop 变体、`think` 5 loop 变体与原版目录一致；窗口 500×500 逻辑像素落在右下角，托盘可退出。原版 GraphCount 的精确对比留到 legacy 可编译时再做。
 
-## Phase 1 · Body MVP（约 2 周）
+## Phase 1 · Body MVP（约 2 周）— ✅ 已完成
 
 | 任务 | 说明 |
 |---|---|
-| 1.1 AnimationPlayer | 三段式 start/loop/end、心情降级、双图层、LRU 预解码 |
-| 1.2 穿透与命中 | Rust 侧光标轮询 + alpha 命中 → 切换 `ignore_cursor_events` |
-| 1.3 触摸 | 摸头 / 摸身体 / 提起拖动 / 放下 |
-| 1.4 气泡 + 输入框 | 流式文本气泡；全局快捷键呼出输入；Esc 收起 |
+| 1.1 AnimationPlayer | ✅ 三段式 start/loop/end、心情降级、双图层（夹心）、LRU 预解码 |
+| 1.2 穿透与命中 | ✅ Rust 侧光标轮询 + alpha 命中 → 切换 `ignore_cursor_events`；窗口上方的头顶区永远穿透 |
+| 1.3 触摸 | ✅ 摸头 / 摸身体 / 提起拖动（Rust 跟随物理光标）/ 放下 |
+| 1.4 气泡 + 输入框 | ✅ 气泡浮在头顶（见 05 §7），流式；输入在独立的对话窗口（`Alt+V` / 单击呼出），可贴屏幕边收起 |
 | 1.5 托盘 | ✅ 显示/隐藏 · 面板 · 送她礼物 · 鼠标穿透开关 · 退出。面板是独立 HTML 入口，只做了「状态 + 调试」一页——`/memory` `/permissions` `/audit` 等各自的数据存在了再加 |
-| 1.6 状态→动画映射 | 订阅 `pet:state`（此时由一个假的 Rust 命令手动触发） |
+| 1.6 状态→动画映射 | ✅ 订阅 `pet:state`，`action.graph` 指定具体动画 |
+| 1.7 语音 | ✅（计划外提前做）Qwen3-TTS 本机合成，按句念，语气可配；动作台词 `lines.rs`。见 CHANGELOG |
 
 **DoD**：能摸、能拖、能弹一句写死的话；CPU 空闲 < 2%，内存 < 300 MB。
 
@@ -58,26 +59,33 @@ Phase 8  打磨与发布            ─  v4
 | 2.4 Pomodoro Engine | ✅ 相位机（25/5，四个一轮转长休 15，节奏可配）；`pomodoro:tick` / `pomodoro:phase`。跑着时把宠物按在对应的事情上（专注→work、休息→rest），但生理急需压得过它——番茄钟不该把人饿死 |
 | 2.5 ToolRegistry + PermissionGate + AuditLog | ✅ `list_tools` / `run_tool` / `recent_audit`，固定走「查工具 → 过权限门 → 执行 → 落审计」。已建：`create_timer` `cancel_timer` `list_timers` `start_pomodoro` `stop_pomodoro` `get_pet_state` `request_action` `set_bias` `clear_bias` `list_biases` `remember` `forget_memory` `search_memory` `memory_context` `pin_memory` `memory_health` `set_permission`。`set_setting` / `get_setting` 等 settings 真有人读时再加；`system_notify` 等系统通知那条路打通再加。`Ask` 的确认气泡是 Phase 3 的 UX，在那之前一律按拒绝处理 |
 | 2.6 Secrets | ⬜ 等 Phase 3 真的要用 API key 时再做——现在没有任何东西需要密钥，提前建一个空的密钥库只是摆设 |
-| 2.7 命令与事件面 | 🚧 已有 `pet:state` `pet:said` `pet:prompt` `timer:fired` `pomodoro:tick` `pomodoro:phase` `tool:confirm` `audit:appended`。`agent:trigger` 等 Phase 6 的 Observer；`build_context` / `session_append` / `memory_upsert` 等 Brain 和记忆到位 |
+| 2.7 命令与事件面 | 🚧 已有 `pet:state` `pet:said` `pet:line` `pet:gift` `pet:prompt` `timer:fired` `focus:started` `focus:ended` `pomodoro:tick` `pomodoro:phase` `chat-stream` `chat:settings-changed` `embed:state` `tool:confirm` `audit:appended`。`agent:trigger` 等 Phase 6 的 Observer 到位时再加 |
 | 2.8 服从与好感度 | ✅ 用户的要求不是命令，是一次概率判定。`affection`（好感度，天级慢变量）进 `PetState`；`obey::judge` 用对数几率模型算服从概率 `σ(基线 + 好感 + 心情 − 生理冲突 − 动作代价 − 压力)`；拒绝理由取冲突最大的那一项，一一对应固定台词。`request_action(target)` 是**唯一一处用户意志进入状态机的入口**，进来立刻降格成一次掷骰。被拒后反复施压会掉心情和好感 |
 | 2.11 长期互动记忆 | ✅ 详见 [09-memory-and-retrieval.md](09-memory-and-retrieval.md)。`memory_items` 表（迁移 v3）是**唯一真相来源**，向量索引只是加速器。六种类型（profile/preference/habit/temporary_context/relationship/commitment），五项加权排序（语义 .55 + 重要性 .20 + 新鲜度 .10 + 使用频次 .10 + 置信度 .05），冲突按来源优先级消解。**推断不能当事实**——`plan_write` 对 `Inferred` 只回 `NeedsConfirm`，类型上就堵死了；敏感内容同理。软删除（行留着当审计，但检索入口按 status 过滤）。相似度是字面 + 语义的混合（见 2.12） |
 | 2.12 语义检索 + 向量索引 | ✅ 本地 ONNX 句向量（`ort` + `tokenizers`，**不用 fastembed**——那会拖进 hf-hub 和 TLS 栈，还强依赖 HuggingFace 可达）+ sqlite-vec `vec0` 虚拟表。模型完全可选：后台加载，缺了就退回字面检索，面板显示当前用哪种。融合是加权和（两路都是余弦，不需要 RRF），稠密侧的门槛是「在不在 KNN 结果里」而非绝对阈值——句向量有各向异性，绝对阈值会把所有东西放进来。换模型自动重建索引并补算 |
-| 2.9 自然语言控制 | ⬜ 把中文翻译成 `request_action` / `set_bias` 的调用。三层递进：① `intents.toml` 规则表 ② char-bigram 余弦近邻（穷人的 embedding，零依赖） ③ 本地 embedding 模型兜长尾（复用 Phase 4 的 `fastembed`，不另引依赖）。**NLU 只是工具层的前端**——Phase 3 的 LLM 调的是同一组工具 |
+| 2.9 自然语言控制 | ✅（第一层）`core/intent.rs`：规则识别中英文的「去玩会儿」「休息 10 分钟」「多工作一点」「设个番茄钟学习一个小时」「十分钟后叫我」，翻成 `request_action` / `set_bias` / 专注段 / 计时器。规则偏保守——误把闲聊当命令比漏掉一句糟。② bigram 近邻 ③ embedding 兜长尾 ⬜ 未做 |
+| 2.13 保护期 directive | ✅ 答应了的请求在一段时间内不被作息拽走（你说的时长 / 动作一轮 / 不限时 20 分钟，最长四小时）；生理急需照样压过；排在番茄钟前面 |
+| 2.14 专注段 | ✅ `scheduler.rs` 的 `focus`：一个带起点的计时器，期间她去做 target，头顶显示倒计时环；到点 `focus:ended` + 提醒 |
 | 2.10 偏好权重 Bias | ✅ 「多工作一点」= 给 tag 加一个带半衰期的权重（默认 120 分钟）。**不是**优先级阶梯上的新一级：它只在「作息」那层里重排 work/study/play 三条道、让正偏置越出时段，排不过「生理急需」，也排不过「到点该睡该吃」。吃喝睡不可压制（`SUPPRESSIBLE` 白名单）——「少吃点」不该把她饿死。`set_bias` / `clear_bias` / `list_biases` |
 
 **DoD**：不开 Brain，用 Panel 里的调试按钮调用 `run_tool("create_timer", {duration:"10s"})` → 10 秒后气泡出现、宠物动画切换、`audit` 表多一行；杀掉进程重启，未到期的计时器仍会触发。
 
-## Phase 3 · Brain v1：对话与工具（约 2 周）
+## Phase 3 · Brain v1：对话与工具（约 2 周）— 🚧 以另一种形态落地
+
+实际做法与设计不同：**对话在 Rust 里直接打本机 Ollama**（`chat.rs`，qwen3.5:9b，预填充「名字：」压住推理泄露），
+没有 tool calling；工具由规则前端（2.9）调用。原因：本机 9B 模型的 tool calling 不可靠且慢，而「去玩」「设番茄钟」这些
+高频意图用规则几毫秒就能认出来，模型只负责把结果说得像她。
 
 | 任务 | 说明 |
 |---|---|
-| 3.1 `packages/shared` | zod schema：ToolDef / ToolCall / ToolResult / Event / PetState；生成 JSON Schema 供 Rust 侧校验 |
-| 3.2 ModelProvider | OpenAI-compatible（含流式 + tools）→ 接你的 OpenAI 官方 key（Q6 已确认）；Anthropic 适配器后置到 Phase 7 |
-| 3.3 AgentLoop | 03 §4.1 的循环；最多 6 轮；denied 回喂 |
-| 3.4 ContextBuilder v1 | personality.yaml + petState + 近期消息（还没有记忆/RAG） |
-| 3.5 会话管理 | `sessions/messages` 表；超过 N 轮自动摘要 |
-| 3.6 Think/Say 联动 | 请求发出 → think；首 token → say；结束 → 回状态动画 |
-| 3.7 Panel：会话 + 审计 | 最简表格 |
+| 3.1 `packages/shared` | 🚧 有 PetState / Verdict / Memory / Manifest 的 zod；ToolDef / ToolCall 只在 Rust 侧 |
+| 3.2 ModelProvider | 🚧 只有 Ollama 本机（设置里可换模型）；OpenAI / Anthropic 云端 ⬜ |
+| 3.3 AgentLoop | ⬜ 模型不调工具（见上）|
+| 3.4 ContextBuilder v1 | ✅ 角色卡（设置里写）+「此刻」（在做什么、饿不饿、刚答应/拒绝了什么）+ 召回的记忆 + 最近 12 轮 |
+| 3.5 会话管理 | ✅ `chat_messages` 表；上下文取最近 12 轮、≤ 10k 字；失败 / 取消 / 差评的回答不进上下文。自动摘要 ⬜ |
+| 3.6 Think/Say 联动 | 🚧 出声时播 `say`；think 动画 ⬜ |
+| 3.7 Panel：会话 + 审计 | ✅ 调试面板有审计；会话在对话窗口 |
+| 3.8 反馈 → 训练 | ✅ 👍 / 修订导出 JSONL，`training/` 里的 LoRA 脚本（未在本机训练过：无 CUDA）|
 
 **DoD（= 场景 S1）**："25 分钟后叫我" 端到端跑通；"以后工作日提醒我至少工作 6 小时" → `set_setting` 落库；"你可以看我的 Obsidian 但不要修改" → `set_permission` 弹确认 → `grants` 表正确。`git tag v0.1.0`。
 
@@ -88,16 +96,16 @@ Phase 8  打磨与发布            ─  v4
 | 4.0 Spike | ~~fastembed~~ ✅ 已在 2.12 做掉，但结论不同：直接用 `ort` + `tokenizers`，模型放本地目录。见 [09](09-memory-and-retrieval.md) §5.3 |
 | 4.1 EmbeddingProvider | ✅ 已在 2.12 落地（`core/embed.rs`）。接口留了 `embed.json` 配置池化方式和查询前缀，换模型只换目录 |
 | 4.2 sqlite-vec + FTS5 | 🚧 `vec_memories` 已在 2.12 建好；`note_chunks`（笔记分块）和 `privacy` 列等 Obsidian 索引开工时再加。FTS5 暂时用字符 n-gram 顶替——记忆是短摘要，够用 |
-| 4.3 Vault Indexer | 分块规则（04 §4.2）；`notify` 增量；`embedding_model` 不一致时重建；按目录规则打 `privacy` 标 |
-| 4.3b 隐私路由 | ContextBuilder：目标 provider 为云端时剔除 `local_only` 块（Q15） |
-| 4.4 MemoryExtractor | extract 路由；结构化输出；`superseded_by` 链 |
-| 4.5 ContextBuilder v2 | + UserProfile 视图 + 召回记忆 + 召回笔记；token 预算（04 §6） |
-| 4.6 工具 | `search_knowledge` `read_note` `remember` `forget_memory` |
-| 4.7 Panel：记忆页 | 列表 / 搜索 / 删除 / 导出 Markdown |
+| 4.3 Vault Indexer | ⬜ 分块规则（04 §4.2）；`notify` 增量；`embedding_model` 不一致时重建；按目录规则打 `privacy` 标 |
+| 4.3b 隐私路由 | ⬜（目前没有云端 provider，暂不需要） |
+| 4.4 MemoryExtractor | ⬜ 现在只有显式命令「记住：…」写记忆，闲聊不自动抽取 |
+| 4.5 ContextBuilder v2 | 🚧 召回记忆 ✅；UserProfile 视图、召回笔记、token 预算 ⬜ |
+| 4.6 工具 | 🚧 `remember` `forget_memory` `search_memory` `memory_context` `pin_memory` ✅；`search_knowledge` `read_note` ⬜ |
+| 4.7 Panel：记忆页 | 🚧 调试面板里有列表 / 检索预览 / 置顶 / 归档 / 删除；导出 Markdown ⬜ |
 
 **DoD**：跨会话它记得"用户在做 VPet 重构、在学 React/Rust"；问"我笔记里关于进程调度写了什么"能引用到具体文件和行号；Panel 里删掉一条记忆后它不再提；**断网状态下索引和检索照常工作**（证明 embedding 没出网）；`个人/` 下的块从不出现在发给 OpenAI 的请求里（Panel 的请求日志可验证）。
 
-## Phase 5 · Data Tools（约 1–2 周）
+## Phase 5 · Data Tools（约 1–2 周）— ⬜ 未开始
 
 | 任务 | 说明 |
 |---|---|
@@ -110,7 +118,7 @@ Phase 8  打磨与发布            ─  v4
 
 **DoD（= 场景 S2）**："我今天下午要把 X 写完，帮我安排" → 它读 `kb_schedule_day` + `kb_dashboard`，提议节奏，开始番茄钟，宠物进入 WORKING。
 
-## Phase 6 · Proactive + Daily Loop（约 2 周）
+## Phase 6 · Proactive + Daily Loop（约 2 周）— ⬜ 未开始（只有到点提醒的计时器）
 
 | 任务 | 说明 |
 |---|---|
@@ -123,7 +131,7 @@ Phase 8  打磨与发布            ─  v4
 
 **DoD（= 场景 S3）**：21:30 它主动发起晚间回顾，用户点"好"后 Daily 文件多出正确的一段；说"安静一小时"后一小时内不再开口。`git tag v0.2.0`。
 
-## Phase 7 · Tutor / Coach / Mood（约 3 周）
+## Phase 7 · Tutor / Coach / Mood（约 3 周）— ⬜ 未开始（Mood 只有 feeling → 表情的映射，`Ill` 未做）
 
 | 任务 | 说明 |
 |---|---|
@@ -137,7 +145,18 @@ Phase 8  打磨与发布            ─  v4
 
 ## Phase 8 · 打磨与发布
 
-多模型路由落地 · Ollama 本地 LLM（`local_only` 路由的 `mode=local`）· 移动/爬墙动画 · 开机自启 · 安装包（NSIS）· 崩溃日志 · 性能（帧缓存、token 用量看板）· 多语言 · 语音（TTS 已提前落地：本机 Qwen3-TTS，`src-tauri/src/tts.rs`；STT 仍未做）。
+| 项 | 状态 |
+|---|---|
+| Ollama 本地 LLM | ✅（就是现在的主路径） |
+| 多模型路由（云端） | ⬜ |
+| 语音 TTS | ✅ Qwen3-TTS，`tts.rs`；STT ⬜ |
+| 移动 / 爬墙动画 | ⬜（资产里有 move / sidehide 帧，没接） |
+| 开机自启 | ⬜ |
+| 安装包（NSIS） | 🚧 `tauri build` 配好了，没验证过安装流程；日常用 `pnpm release` 出 exe |
+| 崩溃日志 | ⬜（只有 stderr 落 `.runtime/vpet-error.log`） |
+| 性能看板 | ⬜ |
+| 多语言 | ⬜（对话/语音中英文都行，UI 只有中文） |
+| CI | ✅ `.github/workflows/ci.yml`：cargo test + typecheck |
 
 ---
 

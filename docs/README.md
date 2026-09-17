@@ -1,6 +1,8 @@
 # VPet → Personal Agent 技术方案
 
-> 状态：**v0.2**（2026-09-17）。Phase 0 已完成并发布 v0.0.1（见 [CHANGELOG](../CHANGELOG.md)）。Q6/Q7/Q8/Q11 已确认（OpenAI 官方 key · 本地 embedding · Rust 核心 · C# 移 legacy/）。其余 `🔶待确认` 见 [08-open-questions.md](08-open-questions.md)，其中 **Q15（隐私路由）** 是下一个要拍板的。
+> 状态：**v0.3**（2026-09-18）。Phase 0–2 完成，Phase 3 以「Rust + 本机 Ollama + 规则意图」的形态落地，语音（Phase 8 的一项）提前做了。
+> 各项进度以 [07-roadmap.md](07-roadmap.md) 的 ✅ / 🚧 / ⬜ 为准；架构现状见 [03](03-architecture.md) §2–3；变更细节见 [CHANGELOG](../CHANGELOG.md)。
+> **约定：改代码的同一次提交里同步改这里的 md**——07 的状态、03 的模块图、CHANGELOG 三处至少动一处。
 
 ## 一句话定义
 
@@ -23,24 +25,17 @@
 | 08 | [待确认问题](08-open-questions.md) | 需要你回答的问题，每个都附了我的默认假设 |
 | 09 | [记忆与检索](09-memory-and-retrieval.md) | **已落地的实现**：她记住什么、怎么找回来、语义向量与向量索引怎么接的。与 04 冲突时以 09 为准 |
 
-## 现状盘点（基于本仓库与 `D:\obsidian\yixiongfei` 的实际内容）
+## 现状盘点（2026-09-18）
 
-**本仓库**（fork 自 LorisYounger/VPet，Apache-2.0）：
+**已经在桌面上跑的**（`启动桌宠.cmd` 一键起）：
 
-- C# / WPF / .NET 桌宠。5 个项目：`Core`（动画/状态/存档）、`Windows`（主程序）、`Windows.Interface`（插件接口）、`Solution`（存档编辑器）、`Tool`。
-- 真正有价值、可以直接复用的资产：
-  - `VPet-Simulator.Windows/mod/0000_core/pet/vup/` — **6181 帧 1000×1000 RGBA PNG，836 MB**，按 `动作类型/心情/变体/帧` 组织，文件名内嵌帧时长（如 `循环A_005_250.png` = 第 5 帧 250 ms）。
-  - `pet/vup.lps` — 触摸区域、提起锚点、工作/学习/娱乐定义、移动规则。
-  - 已有的状态模型（`Core/Handle/GameSave.cs`）：体力 / 饱腹 / 口渴 / 心情 / 健康 / 经验 / 金钱，4 种心情模式 Happy / Nomal / PoorCondition / Ill。
-  - 已有的 LLM 插槽：`Windows.Interface/TalkBox.cs` 定义了 `ITalkAPI`（原版 ChatGPT 插件就挂在这里）——说明"对话"在原设计里就是一等公民，只是没有大脑。
-- 本机**没有** .NET SDK、Rust toolchain、pnpm、Ollama；有 Node 24 + npm 11。
+- **身体**：原版 6181 帧动画（本机 `assets-src/`，不入库）→ WebP；透明置顶窗口、alpha 穿透、摸头 / 摸身 / 提起拖动；气泡浮在头顶，倒计时环挂在头顶。
+- **神经系统（Rust）**：秒级状态机（体力 / 心情 / 饱腹 / 口渴 / 钱 / 经验 / 好感），按 `actions.toml` 的作息自己吃饭睡觉上班学习玩；服从判定（对数几率）；偏好半衰期；保护期；计时器 / 番茄钟 / 专注段；长期记忆（SQLite + 语义向量）；全部纯函数 + 247 个单元测试。
+- **大脑（本机）**：Ollama `qwen3.5:9b` 对话，角色卡 + 「此刻」+ 记忆进系统提示；对话里的「去玩会儿」「设个番茄钟学习一个小时」「十分钟后叫我」「多工作一点」由规则认出来直接进 Core；👍 / 修订可导出训练样本。
+- **声音**：Qwen3-TTS（qwentts.cpp，核显 Vulkan）按句念对话回复、动作台词、答应 / 拒绝、收礼；语气 / 语速 / 音调可调。
+- **没做的**：模型调工具（AgentLoop）、Obsidian / 知识库 / GitHub 集成、主动行为与日常回顾、Tutor / Coach、云端模型、移动动画、开机自启、安装包验证。完整清单见 07。
 
-**知识库（`D:\obsidian\yixiongfei`）**：
-
-- `My-md/`：数学 / 英语 / 408 / 图像 / 个人。
-- `app/`：`obsidian-knowledge-base` v1.0.16，Vite + React 前端 + Express 后端（端口 5174）+ Electron 打包。
-- 后端已经暴露了一套完整的 REST API（`/api/notes`、`/api/search`、`/api/schedule/*`、`/api/review/*`、`/api/vocabulary/*`、`/api/exams/*`、`/api/milestones`、`/api/dashboard`、`/api/stream` SSE）。
-  **这就是"我的网站各种数据"——VPet 的 Tool 层可以几乎零成本地包一层。**
+**本机环境**：Windows 11，Core Ultra 5 125H + Intel Arc 核显（无 CUDA），32 GB 内存；Rust stable、Node 24、pnpm 12、VS Build Tools；Ollama 与 TTS 引擎都由 `scripts/` 装在 `.runtime/`。
 
 ## 三条不动摇的设计原则
 

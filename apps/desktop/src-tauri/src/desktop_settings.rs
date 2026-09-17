@@ -26,7 +26,8 @@ impl DesktopSettings {
     }
 
     pub fn apply(&self, window: &WebviewWindow) -> Result<(), String> {
-        window.set_size(LogicalSize::new(self.size, self.size)).map_err(|e| e.to_string())?;
+        // 立绘是 size × size，上面再留一段给气泡（lib.rs HEAD_ROOM）
+        window.set_size(LogicalSize::new(self.size, self.size * (1.0 + crate::HEAD_ROOM))).map_err(|e| e.to_string())?;
         window.set_always_on_top(self.always_on_top).map_err(|e| e.to_string())
     }
 }

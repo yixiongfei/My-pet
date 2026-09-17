@@ -6,6 +6,9 @@ export interface VoicePrefs {
   enabled: boolean
   speakChat: boolean
   speakLines: boolean
+  /** 播放倍速。tts-server 不做变速，在这里做；不保持音高时快一点也高一点 */
+  speed: number
+  keepPitch: boolean
 }
 
 interface Item {
@@ -24,7 +27,7 @@ const MIN_SENTENCE_CHARS = 4
  * 合成在 Core（`tts_speak`，带磁盘缓存），这里只管顺序和播放。
  */
 export class Speech {
-  prefs: VoicePrefs = { enabled: true, speakChat: true, speakLines: true }
+  prefs: VoicePrefs = { enabled: true, speakChat: true, speakLines: true, speed: 1.12, keepPitch: false }
   /** 开口 / 闭嘴，给 say 动画用 */
   onTalking: ((talking: boolean) => void) | null = null
   /** 队列空了（不管有没有真的出过声）：气泡可以收了 */
@@ -133,6 +136,8 @@ export class Speech {
       this.stopCurrent()
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
+      audio.playbackRate = Math.min(1.6, Math.max(0.7, this.prefs.speed || 1))
+      audio.preservesPitch = this.prefs.keepPitch
       this.current = audio
       this.currentUrl = url
       const done = () => {

@@ -57,14 +57,16 @@ export function Chat() {
     try { await invokeStrict('open_settings_panel') } catch (e) { setError(errorText(e)) }
   }
 
-  const send = async () => {
-    const content = text.trim()
+  /** 发一句；`override` = 重新发送某条旧消息，不动输入框 */
+  const send = async (override?: string) => {
+    const content = (override ?? text).trim()
     if (!content || request.current) return
     if (!IS_TAURI) { setError('这是界面预览。请点击桌面上的人物，在应用里开始本地对话。'); return }
     const requestId = crypto.randomUUID()
     request.current = requestId
     nearBottom.current = true
-    setBusy(true); setStream(''); setError(''); setText('')
+    setBusy(true); setStream(''); setError('')
+    if (override === undefined) setText('')
     setMessages(old => [...old, { id: `pending-${requestId}`, role: 'user', content, createdAt: Date.now(), status: 'complete', rating: null, correctedText: null, source: 'model' }])
     try {
       const answer = await invokeStrict<ChatMessage>('send_chat_message', { text: content, requestId })
@@ -124,9 +126,8 @@ export function Chat() {
         <h2>给日常，留一点陪伴。</h2>
         <p className="welcome-copy">今天的小事、突然的想法，或是一个晚安。<br />从第一句话开始，慢慢熟悉彼此。</p>
         <div className="prompt-suggestions">
-          {['今天想和你聊聊', '一起安排今天吧', '你记得我什么？'].map((suggestion, i) => <button key={suggestion} onClick={() => { setText(suggestion); input.current?.focus() }}><Icon name={i === 0 ? 'chat' : i === 1 ? 'leaf' : 'spark'} size={17} />{suggestion}<Icon name="arrow" size={15} /></button>)}
+          {['今天想和你聊聊', '帮我设个番茄钟，学习一个小时', '去玩会儿吧'].map((suggestion, i) => <button key={suggestion} onClick={() => { setText(suggestion); input.current?.focus() }}><Icon name={i === 0 ? 'chat' : i === 1 ? 'leaf' : 'spark'} size={17} />{suggestion}<Icon name="arrow" size={15} /></button>)}
         </div>
-        <p className="welcome-footnote">你可以在设置里，为她写下独一无二的个性。</p>
       </div> : <div className="message-list">
         <div className="conversation-label"><span />你们的日常<span /></div>
         {messages.map(message => <article className={`message message-${message.role} ${message.status === 'error' ? 'message-error' : ''}`} key={message.id}>
@@ -135,6 +136,7 @@ export function Chat() {
             <div className="message-meta"><span>{message.role === 'assistant' ? settings.persona.name : '你'}</span><time dateTime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time></div>
             <div className="message-bubble">{message.content || (message.status === 'cancelled' ? '这次回答已停止。' : '这次没有生成回答。')}</div>
             {message.status !== 'complete' && <p className="message-state">{message.status === 'cancelled' ? '已停止生成' : '生成未完成'}</p>}
+            {message.role === 'user' && <div className="message-resend"><button disabled={busy} title="把这句话再发一次" onClick={() => void send(message.content)}><Icon name="arrow" size={12} />重新发送</button></div>}
             {message.role === 'assistant' && message.status === 'complete' && message.source === 'model' && <div className="message-feedback">
               <button className={message.rating === 'up' ? 'selected' : ''} disabled={feedbackBusy !== null} title="喜欢这条回答，加入训练素材" aria-label="喜欢这条回答" aria-pressed={message.rating === 'up'} onClick={() => void rate(message, message.rating === 'up' ? null : 'up')}><Icon name="up" size={14} /></button>
               <button className={message.rating === 'down' ? 'selected' : ''} disabled={feedbackBusy !== null} title="这条回答不太好" aria-label="这条回答不太好" aria-pressed={message.rating === 'down'} onClick={() => void rate(message, message.rating === 'down' ? null : 'down')}><Icon name="down" size={14} /></button>
@@ -154,9 +156,8 @@ export function Chat() {
         <textarea ref={input} aria-label="想对她说的话" placeholder="想对她说点什么？" value={text} maxLength={12000} rows={2} onChange={e => setText(e.target.value)} onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); void send() }
         }} />
-        <div className="composer-toolbar"><span><Icon name="leaf" size={14} />{settings.model} <span className="composer-key-hint">· Enter 发送，Shift + Enter 换行</span></span>{busy ? <button type="button" className="send-button stop-button" onClick={() => void cancel()} disabled={cancelling} aria-label="停止生成"><Icon name="stop" size={17} />停止</button> : <button type="submit" className="send-button" disabled={!text.trim()} aria-label="发送消息"><Icon name="send" size={18} /></button>}</div>
+        <div className="composer-toolbar"><span><Icon name="leaf" size={14} />{settings.model}</span>{busy ? <button type="button" className="send-button stop-button" onClick={() => void cancel()} disabled={cancelling} aria-label="停止生成"><Icon name="stop" size={17} />停止</button> : <button type="submit" className="send-button" disabled={!text.trim()} aria-label="发送消息"><Icon name="send" size={18} /></button>}</div>
       </form>
-      <p className="composer-note">对话单独保存。说「记住：…」可以把重要的小事留在她的记忆里。</p>
     </div>
 
     {editing && <div className="modal-backdrop" role="presentation" onClick={e => e.target === e.currentTarget && !feedbackBusy && setEditing(null)}><section className="feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
