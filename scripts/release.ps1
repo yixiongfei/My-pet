@@ -29,11 +29,18 @@ if (-not $skipTestsRequested) {
 if ($checkOnlyRequested) { Write-Host 'All checks passed.' -ForegroundColor Green; exit 0 }
 
 # 正在跑的 release exe 会占住链接器要写的文件
-$running = Get-Process vpet -ErrorAction SilentlyContinue
-if ($running) {
+$running = @(Get-Process -Name 'vpet' -ErrorAction SilentlyContinue)
+if ($running.Count -gt 0) {
     Write-Host '==> stopping the running pet' -ForegroundColor Cyan
-    $running | Stop-Process -Force
-    Start-Sleep -Seconds 2
+    $running | Stop-Process -Force -ErrorAction Stop
+    # Windows keeps an executable locked until process teardown is complete. Waiting on the
+    # process objects is deterministic; a fixed sleep occasionally raced the release linker.
+    $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+    $left = @(Get-Process -Name 'vpet' -ErrorAction SilentlyContinue)
+    if ($left.Count -gt 0) {
+        $ids = ($left | ForEach-Object Id) -join ', '
+        throw "VPet did not stop; refusing to overwrite the running executable (pid $ids)."
+    }
 }
 
 Push-Location $projectRoot

@@ -18,6 +18,16 @@ export const reportTouch = (zone: string) => void invokeCore('pet_touched', { zo
  */
 export const pushFoodCatalog = (items: unknown[]) => void invokeCore('set_food_catalog', { items })
 
+/**
+ * 把 pet.json 里的原版移动规则和贴边锚点交给 Rust。窗口几何必须在 Core 里算；
+ * Body 只负责按照 `pet:motion` 事件播放对应动画。
+ */
+export const pushMotionProfile = (profile: { moves: unknown[]; side: unknown }) =>
+  void invokeCore('set_pet_motion_profile', { profile })
+
+/** 侧挂状态下先把窗口完整拉回屏幕，再交给普通点击 / 提起逻辑。 */
+export const exitPetSide = () => void invokeCore('exit_pet_side')
+
 /** 送她一样礼物（随机挑一件）。返回礼物名字，没货架时返回 null */
 export const giveGift = (id?: string) => invokeCore<string>('give_gift', { id })
 

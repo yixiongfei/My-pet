@@ -41,6 +41,7 @@
 │  ┌────────────▼──────────────────────────────────────────────────────────────┐ │
 │  │ Core (Rust)                                                               │ │
 │  │ lib.rs    窗口/托盘/穿透命中/心跳/全部命令      dock.rs  对话窗贴边收起   │ │
+│  │ pet_motion.rs  人物自主移动 / 侧挂的规则、窗口几何与模式事件            │ │
 │  │ chat.rs   本机对话：角色卡 + 此刻 + 记忆 → Ollama 流式；反馈样本导出      │ │
 │  │ tts.rs    Qwen3-TTS 合成 + 缓存    lines.rs  动作台词（固定 / 模型即兴）  │ │
 │  │ core/     state_machine · actions(.toml) · obey · bias · intent           │ │
@@ -54,7 +55,7 @@
 
 **边界规则**（这几条已经在代码里守住了）：
 
-1. Body 只做渲染、输入和播放；数值怎么变、说什么话，都由 Core 决定后用事件推过来（`pet:state` `pet:line` `pet:said` `pet:gift` `focus:*` `chat-stream`）。
+1. Body 只做渲染、输入和播放；数值怎么变、说什么话、人物窗口怎么移动，都由 Core 决定后用事件推过来（`pet:state` `pet:line` `pet:said` `pet:gift` `pet:motion` `focus:*` `chat-stream`）。
 2. **用户意志进入状态机只有一个入口**：`request_action` → 服从判定。对话里的「去玩会儿」也走这里，模型只是把结果说出来。
 3. Core 是唯一碰网络和数据库的地方。Ollama / tts-server 的地址都经 `local_endpoint` 校验，只接受本机。
 4. `reduce` 是纯函数：时间、随机数从外面喂，所以作息、保护期、服从概率全部有单元测试（247 个）。
@@ -78,7 +79,7 @@ Vpet/
     └── src-tauri/src/
         ├── lib.rs              窗口 · 托盘 · 穿透命中 · 心跳 · 命令 · 记忆命令 · 专注段
         ├── chat.rs             对话（设置 / 历史 / 系统提示 / 流式 / 使唤结果 / 训练样本）
-        ├── tts.rs  lines.rs  dock.rs  desktop_settings.rs
+        ├── tts.rs  lines.rs  dock.rs  pet_motion.rs  desktop_settings.rs
         └── core/               state_machine · actions · obey · bias · intent · scheduler
                                 pomodoro · memory · embed · db · food · tools
 ```

@@ -10,6 +10,7 @@ mod desktop_settings;
 mod chat;
 mod dock;
 mod lines;
+mod pet_motion;
 mod tts;
 
 use std::sync::{Mutex, RwLock};
@@ -1439,11 +1440,12 @@ fn begin_pet_drag(hit: State<'_, Mutex<HitState>>, anchor_x: f64, anchor_y: f64)
 }
 
 #[tauri::command]
-fn end_pet_drag(hit: State<'_, Mutex<HitState>>) {
+fn end_pet_drag(app: AppHandle, hit: State<'_, Mutex<HitState>>) {
     if let Ok(mut hit) = hit.lock() {
         hit.drag_anchor = None;
         hit.pinned = false;
     }
+    pet_motion::settle_after_drag(&app);
 }
 
 pub fn run() {
@@ -1465,6 +1467,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(Mutex::new(HitState::default()))
         .manage(dock::DockState::default())
+        .manage(pet_motion::MotionState::default())
         .setup(|app| {
             // 动作表读在最前面：状态机的每一步都要查它
             let cat = Catalog::load();
@@ -1523,6 +1526,8 @@ pub fn run() {
             set_hit_test_pinned,
             begin_pet_drag,
             end_pet_drag,
+            pet_motion::set_pet_motion_profile,
+            pet_motion::exit_pet_side,
             open_chat,
             open_settings_panel,
             desktop_settings::get_desktop_settings,

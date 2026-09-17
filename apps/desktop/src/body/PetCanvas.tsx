@@ -9,7 +9,7 @@ import { Interaction } from './interaction'
 import { invokeCore } from './ipc'
 import { loadManifest, loadProfile } from './manifest'
 import { fetchPetState, subscribePetState } from './petState'
-import { openChat, openSettingsPanel, pushFoodCatalog, pushHitMask, reportTouch } from './petWindow'
+import { exitPetSide, openChat, openSettingsPanel, pushFoodCatalog, pushHitMask, pushMotionProfile, reportTouch } from './petWindow'
 import { hideDelayMs } from './say'
 import { Speech } from './speech'
 import { toLogical } from './touch'
@@ -149,6 +149,7 @@ export function PetCanvas() {
           onTouch: reportTouch,
           onClick: () => void openChat(),
           onDragChange: setDragging,
+          onSideExit: exitPetSide,
         })
         interactionRef.current = interaction
         interaction.start()
@@ -161,6 +162,7 @@ export function PetCanvas() {
           scheduleHide(Math.max(AFTER_SPEECH_MS, hideDelayMs(text) - (Date.now() - at)))
         }
         pushFoodCatalog(manifest.food)
+        pushMotionProfile({ moves: profile.moves, side: profile.side })
         stops.push(subscribePetState((state) => interaction.setState(state)))
         void fetchPetState().then((state) => { if (state && !disposed) interaction.setState(state) })
         void invokeCore<unknown>('get_chat_settings').then((s) => { if (!disposed) applyVoiceSettings(s) })
@@ -168,6 +170,7 @@ export function PetCanvas() {
         stops.push(subscribe('pet:prompt', () => void openChat()))
         stops.push(subscribe('chat-stream', onChatStream))
         stops.push(subscribe('pet:drag-ended', () => interaction.onPointerUp(true)))
+        stops.push(subscribe('pet:motion', (payload) => interaction.handleMotion(payload)))
         // 拆礼物的动画只播一遍；她说什么由紧跟着的 pet:line 决定
         stops.push(subscribe('pet:gift', (payload) => {
           const received = payload as { id?: string } | null
@@ -223,7 +226,9 @@ export function PetCanvas() {
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const point = toLogical(event.currentTarget, event.clientX, event.clientY)
-    setHovered(maskRef.current?.isOpaqueAt(point.x, point.y) ?? true)
+    const opaque = maskRef.current?.isOpaqueAt(point.x, point.y) ?? true
+    setHovered(opaque)
+    interactionRef.current?.setHovered(opaque)
     interactionRef.current?.onPointerMove(point.x, point.y, event.screenX, event.screenY)
   }
 
@@ -264,7 +269,7 @@ export function PetCanvas() {
         onPointerUp={onPointerUp}
         onPointerCancel={() => interactionRef.current?.onPointerUp(true)}
         onLostPointerCapture={() => interactionRef.current?.onPointerUp(true)}
-        onPointerLeave={() => setHovered(false)}
+        onPointerLeave={() => { setHovered(false); interactionRef.current?.setHovered(false) }}
         onContextMenu={(event) => { event.preventDefault(); void openSettingsPanel() }}
         onDoubleClick={closeBubble}
       >

@@ -103,6 +103,7 @@ const CLIP_FOR: Record<Activity, { type: GraphType; name?: string }> = {
   - 交互期间（按下 / 提起）由 Body 调 `set_hit_test_pinned(true)` 钉住不穿透，否则把宠物拖到光标不再压着它的位置时，轮询会当场把拖拽切断。
   - 托盘留了「鼠标穿透」开关，就是 07 风险表里那条退路的运行时版本。
 - **触摸**：摸头 → `touch_head` 三段式；摸身体 → `touch_body`；按住拖动 → `raise`（提起动态）+ 窗口跟随；放下 → 落地。
+- **人物侧挂**：放下时 Core 按底部身体方画布检查越界，超过左右边 50 个逻辑像素后，用 `pet.json.side` 的原版锚点吸附。Body 依次播放 `SideHide_*_Main` 的 start/loop；当前帧不透明区域 hover 时切 `Rise` 的 start/loop，离开播 Rise end 再回 Main，按下播 Main end 并恢复完整窗口。窗口上方 0.6 倍边长的头顶区不参与位置计算；缩放和多屏负坐标均在 Rust 侧换算。
 - **气泡**：同一窗口内的 DOM 层（不另开窗口），贴着窗口底部向上生长、盖在宠物身上——与原版 `MessageBar.xaml`（500×500 的层 + `VerticalAlignment=Bottom`）一致。流式文本、最多 3 行，超出折叠为"展开"。
   > `vup.lps` 里**没有** `say` 锚点（顶层只有 pet/tag/touchhead/touchbody/touchraised/pinch/raisepoint/work/move/duration/bday/side），所以位置不走配置，按原版的底对齐规则来。
   > 折叠不能用 `-webkit-line-clamp`：它在布局层就截断内容，`scrollHeight` 会等于 `clientHeight`，测不出溢出。用 `max-height` 裁。
@@ -142,3 +143,10 @@ mood 由体力/心情决定：feeling ≥ 70 → Happy；≥ 40 → Nomal；< 40
 - 说话：Body 的 `Speech` 队列按句把文本送去 `tts_speak`，前一句在放时后一句已在合成；出声期间播 `say` 动画，
   一次性动画（摸头、拆礼物）播完再接。气泡在念完之前不收。
 - 拆礼物只由 `pet:gift` 触发一遍；`gift` 活动待机时播 `default`（否则循环三分钟）。
+
+## 8. 原版移动资源接入状态（2026-09-18）
+
+- 资产生成没有漏帧：当前仍是 609 clips / 6181 帧；其中 SideHide 48 clips / 254 帧已经进入交互状态机，不复制资源，也不另造近似动画。
+- `pet.json` 已完整解析原版 16 条 `move` 规则和左右侧挂锚点；窗口几何由 `pet_motion.rs` 管，Body 只按 `pet:motion` 播动画，避免后台 WebView 节流导致窗口走慢。
+- 左右 SideHide 已完成；走路、爬行、爬墙、顶部移动与坠落的 98 clips / 534 帧正在按原版 `GraphHelper.Move` 的 Trigger / Check / Locate / Speed 规则接入。
+- `Think` 在原资源里本来就是 `common + name=think`，不是独立 `type=think`。接对话等待动画时必须按 manifest 的真实键查找，不能因为旧设计稿里的示例另造映射。

@@ -21,7 +21,13 @@ export interface InteractionOpts {
   onTouch?: (zone: ClickZone | 'raise') => void
   onClick?: () => void
   onDragChange?: (dragging: boolean) => void
+  /** 侧挂的角色被碰到：先让 Core 把窗口完整拉回屏幕 */
+  onSideExit?: () => void
 }
+
+type MotionEvent =
+  | { kind: 'side'; side: 'left' | 'right' }
+  | { kind: 'stop' }
 
 /**
  * 触摸交互状态机，移植自 legacy/VPet-Simulator.Core/Display/Main.xaml.cs 的鼠标处理：
@@ -34,7 +40,7 @@ export interface InteractionOpts {
  */
 export class Interaction {
   /** 交互模式，和 PetState.activity 是两回事：这个说「此刻正在干什么」 */
-  private mode: 'idle' | 'touching' | 'raised' | 'talking' = 'idle'
+  private mode: 'idle' | 'touching' | 'raised' | 'talking' | 'side' | 'side-exit' = 'idle'
   private state: PetState = DEFAULT_PET_STATE
   private idleTimer = 0
   private pressTimer = 0
@@ -47,6 +53,10 @@ export class Interaction {
   private disposed = false
   /** 正在出声（语音在放）。一次性动画播完后 toActivity 会先接上 say 动画 */
   private speaking = false
+  private side: 'left' | 'right' | null = null
+  private sideHovered = false
+  /** 每次切换侧挂阶段就递增；异步解码完的旧回调看到代数不一致便作废 */
+  private sideGeneration = 0
 
   constructor(private readonly o: InteractionOpts) {}
 
@@ -107,8 +117,37 @@ export class Interaction {
     void this.o.player.playOnce({ type: 'common', name: 'gift', mood: this.state.mood, foodId })
   }
 
+  /** Core 只发窗口模式，具体的 Start/Loop/End 编排在 Body。 */
+  handleMotion(payload: unknown): void {
+    if (this.disposed || !payload || typeof payload !== 'object') return
+    const event = payload as Partial<MotionEvent> & { side?: unknown }
+    if (event.kind === 'side' && (event.side === 'left' || event.side === 'right')) {
+      this.enterSide(event.side)
+    } else if (event.kind === 'stop') {
+      this.leaveSide()
+    }
+  }
+
+  /** SideHide Main ↔ Rise。只按当前帧的不透明区域算 hover，透明处不触发探头。 */
+  setHovered(hovered: boolean): void {
+    if (this.disposed || this.mode !== 'side' || !this.side || hovered === this.sideHovered) return
+    this.sideHovered = hovered
+    const side = this.side
+    const generation = ++this.sideGeneration
+    if (hovered) {
+      const type = this.sideType(side, 'rise')
+      void this.o.player.playStep({ type, mood: this.state.mood }, 'start', () =>
+        this.loopSide(type, side, generation))
+    } else {
+      const rise = this.sideType(side, 'rise')
+      void this.o.player.playStep({ type: rise, mood: this.state.mood }, 'end', () =>
+        this.loopSide(this.sideType(side, 'main'), side, generation))
+    }
+  }
+
   dispose(): void {
     this.disposed = true
+    this.sideGeneration++
     window.clearTimeout(this.idleTimer)
     window.clearTimeout(this.pressTimer)
     endPetDrag()
@@ -118,6 +157,10 @@ export class Interaction {
 
   onPointerDown(x: number, y: number, screenX = x, screenY = y): void {
     if (this.disposed || this.mode === 'raised') return
+    if (this.mode === 'side') {
+      this.o.onSideExit?.()
+      this.leaveSide()
+    }
     this.lastAt = { x, y }
     this.pressAt = { x, y, screenX, screenY }
     this.setPinned(true) // 按下期间别让穿透判定把窗口切走
@@ -182,6 +225,9 @@ export class Interaction {
 
   /** 回到当前活动对应的循环动画。话还没说完就先接 say */
   private toActivity(): void {
+    this.sideGeneration++
+    this.side = null
+    this.sideHovered = false
     this.mode = 'idle'
     if (!this.pressAt) this.setPinned(false)
     if (this.speaking) {
@@ -250,7 +296,9 @@ export class Interaction {
 
   /** 原版 MainDisplay.DisplayRaising 的 rasetype 递归 */
   private raiseStep = (): void => {
-    if (this.disposed) return
+    // 放下时 Core 可能已经判定越过屏幕边缘并切进 SideHide。旧的异步解码
+    // 回调不能再播落地 / toActivity，把刚开始的侧挂动画抢回去。
+    if (this.disposed || this.mode !== 'raised') return
     const mood = this.state.mood
     const name = this.raiseName
     if (this.released) {
@@ -268,6 +316,43 @@ export class Interaction {
       return
     }
     void this.o.player.playStep({ type: 'raised_static', name, mood }, 'loop', this.raiseStep)
+  }
+
+  /* ------------------------ 左右侧挂 ------------------------ */
+
+  private sideType(side: 'left' | 'right', phase: 'main' | 'rise'): GraphType {
+    return `sidehide_${side}_${phase}` as GraphType
+  }
+
+  private enterSide(side: 'left' | 'right'): void {
+    window.clearTimeout(this.idleTimer)
+    window.clearTimeout(this.pressTimer)
+    this.side = side
+    this.sideHovered = false
+    this.mode = 'side'
+    const generation = ++this.sideGeneration
+    const type = this.sideType(side, 'main')
+    void this.o.player.playStep({ type, mood: this.state.mood }, 'start', () =>
+      this.loopSide(type, side, generation))
+  }
+
+  private loopSide(type: GraphType, side: 'left' | 'right', generation: number): void {
+    if (this.disposed || generation !== this.sideGeneration || this.mode !== 'side' || this.side !== side) return
+    void this.o.player.playStep({ type, mood: this.state.mood }, 'loop', () =>
+      this.loopSide(type, side, generation))
+  }
+
+  private leaveSide(): void {
+    const side = this.side
+    if (!side || !['side', 'side-exit'].includes(this.mode)) return
+    this.side = null
+    this.sideHovered = false
+    this.mode = 'side-exit'
+    const generation = ++this.sideGeneration
+    const type = this.sideType(side, 'main')
+    void this.o.player.playStep({ type, mood: this.state.mood }, 'end', () => {
+      if (!this.disposed && generation === this.sideGeneration && this.mode === 'side-exit') this.toActivity()
+    })
   }
 
 }
