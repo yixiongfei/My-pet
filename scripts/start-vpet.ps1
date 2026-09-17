@@ -76,10 +76,20 @@ if (-not $ttsReady) {
     }
 }
 
-$runningPet = Get-Process vpet -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $petExe }
-if ($runningPet) {
+$allPets = @(Get-Process vpet -ErrorAction SilentlyContinue)
+$runningPet = @($allPets | Where-Object { $_.Path -eq $petExe })
+if ($runningPet.Count -gt 0) {
+    # 旧版曾把 exe 复制到桌面；只按路径判断会让桌面副本和仓库 release 同时运行，
+    # 整点动作台词就会被两份状态机重复播放。保留一份当前 release，其余全部停掉。
+    $keep = $runningPet | Select-Object -First 1
+    $allPets | Where-Object { $_.Id -ne $keep.Id } | Stop-Process -Force -ErrorAction SilentlyContinue
     Write-Host 'VPet is already running. Click the pet or press Alt+V to chat.'
     return
+}
+if ($allPets.Count -gt 0) {
+    Write-Host 'Stopping stale VPet copies before starting the current release...'
+    $allPets | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
 }
 if ($Rebuild -or -not (Test-Path -LiteralPath $petExe)) {
     Push-Location $projectRoot

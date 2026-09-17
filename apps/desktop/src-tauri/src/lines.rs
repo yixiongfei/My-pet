@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -120,8 +121,20 @@ pub struct Line {
 
 /// 上一句什么时候说的。跨线程：心跳线程和主线程都会来
 #[derive(Default)]
+struct LineClockState {
+    last: Option<Instant>,
+    by_action: HashMap<String, Instant>,
+}
+
+#[derive(Default)]
 pub struct LineClock {
-    last: Mutex<Option<Instant>>,
+    state: Mutex<LineClockState>,
+}
+
+/// 自动动作台词的安静时段。提醒、对话、礼物都不走这里，仍会按用户要求出声。
+/// 7:00 恰好是 sleep 的结束和早餐时段的开始，过去会在这里突然报一遍早餐台词。
+fn automatic_lines_are_quiet(hour: u32) -> bool {
+    hour >= 23 || hour < 8
 }
 
 fn fill(template: &str, a: &ActionRef, name: &str) -> String {
@@ -162,13 +175,28 @@ pub fn announce(app: &AppHandle, a: &ActionRef, force: bool) {
     if mode == LineMode::Off {
         return;
     }
+    if !force && automatic_lines_are_quiet(chrono::Local::now().hour()) {
+        log::info!("安静时段跳过自动动作台词：{}", a.name);
+        return;
+    }
     if let Some(clock) = app.try_state::<LineClock>() {
-        let Ok(mut last) = clock.last.lock() else { return };
+        let Ok(mut state) = clock.state.lock() else { return };
         let gap = Duration::from_secs(settings.lines.min_gap_sec as u64);
-        if !force && last.is_some_and(|t| t.elapsed() < gap) {
-            return;
+        if !force {
+            if state.last.is_some_and(|t| t.elapsed() < gap) {
+                return;
+            }
+            // 同一个动作短时间来回切换时不要复读。十分钟只约束自动台词；
+            // 礼物等明确交互用 force=true，仍然每次都有回应。
+            let same_action_gap = Duration::from_secs(settings.lines.min_gap_sec.max(600) as u64);
+            if state.by_action.get(&a.id).is_some_and(|t| t.elapsed() < same_action_gap) {
+                return;
+            }
         }
-        *last = Some(Instant::now());
+        let now = Instant::now();
+        state.last = Some(now);
+        state.by_action.insert(a.id.clone(), now);
+        state.by_action.retain(|_, at| at.elapsed() < Duration::from_secs(7200));
     }
     let cat = app.state::<Catalog>();
     let spoken = settings.voice.enabled && settings.voice.speak_lines;
@@ -337,5 +365,15 @@ mod tests {
         assert_eq!(tidy("  开饭咯～  ", "萝莉斯"), "开饭咯～");
         assert_eq!(tidy("2、", "萝莉斯"), "");
         assert_eq!(tidy("3. 萝莉斯：哎呀，你输了！", "萝莉斯"), "哎呀，你输了！");
+    }
+
+    #[test]
+    fn 自动台词在夜间和早上七点静音() {
+        for hour in [23, 0, 3, 7] {
+            assert!(automatic_lines_are_quiet(hour), "{hour} 点应该静音");
+        }
+        for hour in [8, 12, 22] {
+            assert!(!automatic_lines_are_quiet(hour), "{hour} 点应该允许动作台词");
+        }
     }
 }

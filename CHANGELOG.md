@@ -13,6 +13,7 @@
 - `scripts/release.ps1` / `pnpm check` / `pnpm release`：测试 → 类型检查 → 停桌宠 → 编 release → 拉起。CI 跑同一套。`CLAUDE.md` 写明改代码必须同步改 docs。
 
 ### 修复
+- **早上 7 点突然说话 / 声音重复**：7:00 同时是睡眠时段结束和早餐时段开始，自动动作台词过去会立刻出声；现在 23:00–08:00 的自动台词静音（用户设置的提醒、主动对话、送礼不受影响），同一动作十分钟内不复读。另修复启动器只按 exe 路径查重的问题，并在 Core 加跨路径单实例互斥量——桌面旧副本与仓库 release 不会再同时运行、把同一句送进 TTS 两遍。
 - **「本地模型返回了空回答」**：qwen3.x 在 think=false 下偶尔一开口就吐一个 `<think>`，而它是停止词——生成当场结束，什么都没有。不再当停止词，`clean_reply` 把 `<think>…</think>` 整段抠掉。
 - **回答戛然而止**。用同一段上下文回放实测：五个一样的「醒醒，别睡了」连着放进历史，9B 模型有一半的回答说到一半就发 EOS，去掉停止词、关掉重复惩罚都没用；把重复的问题只留最后一次、上下文从十二轮减到八轮，就基本不再发生。另外：历史进上下文前再过一遍 `clean_reply`（上一条以「[旁白：…」收尾的回答会教它照抄）；结尾没闭合的「(好奇」这种开了个动作描写就停的尾巴直接去掉；剩下真被截断的补一个「…」，读起来是欲言又止而不是断线。
 - **她会说话：Qwen3-TTS 语音**（`src-tauri/src/tts.rs`）。后端是 [qwentts.cpp](https://github.com/ServeurpersoCom/qwentts.cpp)（Qwen3-TTS-12Hz 的 C++/GGML 移植，自带 OpenAI 兼容的 `tts-server`），模型是 `Qwen3-TTS-12Hz-0.6B-CustomVoice` 的 Q8_0 GGUF——不是 Python + PyTorch：这台机器没有 CUDA，PyTorch 在 CPU 上跑 0.6B 是 2 倍实时，而 GGML 走 Vulkan 核显是 0.75 倍实时，还省了一整套 Python 环境。

@@ -1447,6 +1447,13 @@ fn end_pet_drag(hit: State<'_, Mutex<HitState>>) {
 }
 
 pub fn run() {
+    // 同一用户会话里只允许一个 VPet。桌面上残留一份旧 exe、仓库里又启动一份时，
+    // 两个状态机会在整点同时说话；更糟的是两个 Body 会把同一句都送进 TTS。
+    // 用 Windows 命名互斥量跨路径去重，不能只按可执行文件路径判断。
+    if !claim_single_instance() {
+        eprintln!("VPet 已经在运行，本次启动退出。");
+        return;
+    }
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     // WebView2 默认要用户先点过页面才许自动播放有声音的媒体；她的台词不该等人点一下才出声。
     // 这个环境变量会在建 WebView2 环境时被读走，得在第一个窗口出来之前设
@@ -1579,6 +1586,41 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// 保持到进程退出的 Windows 命名互斥量。名字绑定产品 id，所以从桌面副本和仓库
+/// release 目录启动也会命中同一把锁；创建失败时 fail-open，不能因为系统 API 异常
+/// 让用户永远打不开桌宠。
+#[cfg(target_os = "windows")]
+fn claim_single_instance() -> bool {
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+    static INSTANCE_MUTEX: OnceLock<usize> = OnceLock::new();
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateMutexW(attributes: *const c_void, initial_owner: i32, name: *const u16) -> *mut c_void;
+        fn GetLastError() -> u32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+
+    let name: Vec<u16> = "Local\\dev.yixiongfei.vpet.instance\0".encode_utf16().collect();
+    let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+    if handle.is_null() {
+        return true;
+    }
+    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        unsafe { CloseHandle(handle) };
+        return false;
+    }
+    let _ = INSTANCE_MUTEX.set(handle as usize);
+    true
+}
+
+#[cfg(not(target_os = "windows"))]
+fn claim_single_instance() -> bool {
+    true
 }
 
 /// 把窗口放到当前显示器右下角（留出任务栏）。Phase 1 会改为记住上次位置。

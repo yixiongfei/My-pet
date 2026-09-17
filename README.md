@@ -64,6 +64,7 @@ pnpm release           # 测试 → 编 release exe → 重启桌宠（scripts/r
   [qwentts.cpp](https://github.com/ServeurpersoCom/qwentts.cpp) 的 GGML 移植在核显上跑（Vulkan，约 0.75 倍实时），不联网。
   第一次运行 `scripts/setup-tts.ps1` 编译并下载权重（约 1.3 GB，全部落在 `.runtime/`），之后 `start-vpet.ps1` 会自动拉起 `tts-server`。
   设置页「声音与台词」可以关掉语音、换声音、试听、逐个动作改台词。
+  自动动作台词在 23:00–08:00 静音；提醒、你主动发起的对话和送礼回应不受影响。同一动作短时间来回切换也不会复读。
 - 觉得某句回答好就点 👍，不好就写下「你希望她怎么说」；这些样本可在设置里导出，
   用 [training/](training/README.md) 里的 LoRA 脚本训练成你自己的模型，再在设置里切换过去。
   聊天记录只是对话，**不会**自动进入长期记忆；说「记住：…」才会。

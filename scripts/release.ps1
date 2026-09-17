@@ -7,6 +7,9 @@ param(
 # 修一处 → 发布到桌面：测试 → 类型检查 → 停掉正在跑的桌宠 → 编 release exe → 用 start-vpet.ps1 拉起来。
 # 平时改完代码就跑这个；它失败在哪一步就停在哪一步，不会把没过测试的版本推上桌面。
 $ErrorActionPreference = 'Stop'
+$rawArgs = @($args | ForEach-Object { $_.ToString() })
+$skipTestsRequested = $SkipTests.IsPresent -or $rawArgs -contains '-SkipTests'
+$checkOnlyRequested = $CheckOnly.IsPresent -or $rawArgs -contains '-CheckOnly'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $desktop = Join-Path $projectRoot 'apps\desktop'
 $tauri = Join-Path $desktop 'src-tauri'
@@ -17,13 +20,13 @@ function Step($name, [scriptblock]$body) {
     if ($LASTEXITCODE -ne 0) { throw "$name failed (exit $LASTEXITCODE)." }
 }
 
-if (-not $SkipTests) {
+if (-not $skipTestsRequested) {
     Push-Location $tauri
     try { Step 'cargo test' { cargo test --quiet } } finally { Pop-Location }
     Push-Location $projectRoot
     try { Step 'typecheck' { pnpm -r typecheck } } finally { Pop-Location }
 }
-if ($CheckOnly) { Write-Host 'All checks passed.' -ForegroundColor Green; return }
+if ($checkOnlyRequested) { Write-Host 'All checks passed.' -ForegroundColor Green; exit 0 }
 
 # 正在跑的 release exe 会占住链接器要写的文件
 $running = Get-Process vpet -ErrorAction SilentlyContinue
