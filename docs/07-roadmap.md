@@ -155,7 +155,6 @@ Phase 8  打磨与发布            ─  v4
 | 安装包（NSIS） | 🚧 `tauri build` 配好了，没验证过安装流程；日常用 `pnpm release` 出 exe |
 | 崩溃日志 | ⬜（只有 stderr 落 `.runtime/vpet-error.log`） |
 | 性能看板 | ⬜ |
-| 多语言 | ⬜（对话/语音中英文都行，UI 只有中文） |
 | CI | ✅ `.github/workflows/ci.yml`：cargo test + typecheck |
 
 ---

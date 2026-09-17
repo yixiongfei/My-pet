@@ -36,7 +36,6 @@
 | 流式回复 | token 级流式到气泡，同时 `Think` → `Say` 动画 | v1 |
 | 模型抽象 | `ModelProvider`：OpenAI-compatible、Anthropic、Ollama；按任务路由 | v1 抽象，v2 路由 |
 | 多轮会话 | Session 管理，自动摘要压缩 | v1 |
-| 多语言 | 中文默认；日/英按上下文 | v2 |
 
 ## L2 记忆
 

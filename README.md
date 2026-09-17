@@ -3,7 +3,7 @@
 > 一个有身体、有状态、有记忆、能看懂你的工作/学习环境，并通过自然语言陪你工作和学习的 Personal Agent。
 > 身体来自 [VPet-Simulator](https://github.com/LorisYounger/VPet) 的动画资产；大脑是新的。
 
-**当前阶段：Phase 0**（方案 + 脚手架 + 桌面上会呼吸的第一帧）。完整技术方案见 [docs/](docs/README.md)。
+**当前阶段：Body / Core 已可日常使用，Agent 与知识库能力继续按路线图补齐。** 完整实现状态见 [docs/](docs/README.md) 与 [路线图](docs/07-roadmap.md)。
 
 ## 目录
 
@@ -51,7 +51,7 @@ pnpm release           # 测试 → 编 release exe → 重启桌宠（scripts/r
   对话窗口拖到屏幕左右边缘会**吸附并自动收起**（只留一条边，鼠标碰到再滑出来）；自己发过的话悬浮可「重新发送」。
 - 她说的话浮在**头顶的气泡**里；「帮我设个番茄钟，学习一个小时」「十分钟后叫我」会在头顶挂一个**倒计时环**，到点提醒。
 - 设置里可以调**显示大小**（200–800 px）、是否**始终置顶**，写她的**名字 / 背景 / 形象 / 性格 / 说话方式**，选一件**礼物**送她。
-- 对话跑在本机 [Ollama](https://ollama.com) 上（默认 `qwen3.5:9b`，6.6 GB；嫌慢可在设置里换成 `qwen3:4b`），不联网、不上传。
+- 对话跑在本机 [Ollama](https://ollama.com) 上（默认 `qwen3.5:9b`，6.6 GB），不联网、不上传。为避免重复占用磁盘，启动器只维护当前配置的模型，不再随包保留第二套 4B 权重。
   `scripts/start-vpet.ps1`（或双击 `启动桌宠.cmd`）会自动拉起 `.runtime/ollama` 里的服务、补齐缺的模型并启动桌宠。
   脚本默认打开 Vulkan 核显推理（`OLLAMA_IGPU_ENABLE=1`）：在 Intel Arc 核显上 9B 的首字延迟从 4.8 s 降到 1.9 s，
   且推理不再占 CPU。内存紧张（其他程序占用超过 ~20 GB）时，对话模型和嵌入模型会被 Ollama 轮流换出，回复会偶尔多等几秒。
@@ -60,7 +60,7 @@ pnpm release           # 测试 → 编 release exe → 重启桌宠（scripts/r
   作息不会中途把她拽走；过了保护期她照自己的安排继续。「多工作一点」「别玩了」则是持续几小时的倾向。她的回复会知道自己刚答应了 / 拒绝了什么。
 - **她会说话**：动作开始时随口一句（去工作、开饭、拆礼物……每个动作可以在设置里配多条台词，也可以让本机模型按她的性格写几条或每次即兴），
   答应 / 拒绝你、收到礼物、对话回复都能念出来。语音是本机的 [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS)
-  （0.6B CustomVoice，中英文都行；默认声音 `serena`，温柔的少女声，语气跟着心情走），通过
+  （0.6B CustomVoice，中英文都行；默认声音 `vivian`，使用偏快、偏高、起伏较小的 Neuro 风预设），通过
   [qwentts.cpp](https://github.com/ServeurpersoCom/qwentts.cpp) 的 GGML 移植在核显上跑（Vulkan，约 0.75 倍实时），不联网。
   第一次运行 `scripts/setup-tts.ps1` 编译并下载权重（约 1.3 GB，全部落在 `.runtime/`），之后 `start-vpet.ps1` 会自动拉起 `tts-server`。
   设置页「声音与台词」可以关掉语音、换声音、试听、逐个动作改台词。

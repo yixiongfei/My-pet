@@ -65,7 +65,7 @@ pub struct ChatSettings {
 impl Default for ChatSettings {
     fn default() -> Self {
         Self {
-            // 9B 在 Arc 核显（Vulkan）上约 8 tok/s、首字 2 s；想更快可在设置里换 qwen3:4b（18 tok/s）
+            // 9B 在 Arc 核显（Vulkan）上约 8 tok/s、首字 2 s；模型名仍可在设置里自定义
             model: "qwen3.5:9b".into(),
             endpoint: "http://127.0.0.1:11434".into(),
             temperature: 0.75,

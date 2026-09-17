@@ -1,6 +1,6 @@
 # 用你认可的回答训练她
 
-日常聊天默认使用本机 Ollama 的 `qwen3.5:9b`（6.6 GB；`qwen3:4b` 也已安装，可在设置里切换）。人物设定会立即进入后续聊天的系统提示词；点赞或修改回答只收集训练样本，**不会偷偷训练或立刻改变模型权重**。
+日常聊天默认使用本机 Ollama 的 `qwen3.5:9b`（6.6 GB）。人物设定会立即进入后续聊天的系统提示词；点赞或修改回答只收集训练样本，**不会偷偷训练或立刻改变模型权重**。
 
 当前电脑为 32 GB 内存 + Intel Arc Pro；本地推理可以运行，CUDA 训练不可用。LoRA 训练脚本已准备，但没有真实样本时不应该训练。建议先收集至少 30 条、最好 100–300 条不同情境下的优质回答，并保留另外一批问题进行对比。
 
@@ -37,6 +37,6 @@ LoRA 默认 rank 8、只训练 Q/V 投影、2 个 epoch、仅最后一条经过�
 .runtime/ollama/ollama.exe create vpet-personal -f training/output/run-001/merged/Modelfile
 ```
 
-然后在 VPet 设定中把模型名改成 `vpet-personal`，检查模型连接并保存。先用没有参与训练的问题对比基座和新模型；若表现退步，切回 `qwen3:4b`。导出适配器本身不等于 Ollama 已加载它，必须先完成合并和导入。若当前 Ollama 不支持该 Safetensors 结构，可用 llama.cpp 转成 GGUF 再导入，见官方说明。
+然后在 VPet 设定中把模型名改成 `vpet-personal`，检查模型连接并保存。先用没有参与训练的问题对比基座和新模型；若表现退步，切回默认的 `qwen3.5:9b`。导出适配器本身不等于 Ollama 已加载它，必须先完成合并和导入。若当前 Ollama 不支持该 Safetensors 结构，可用 llama.cpp 转成 GGUF 再导入，见官方说明。
 
-参考：[Qwen3.5-9B 模型](https://huggingface.co/Qwen/Qwen3.5-9B)（用 qwen3:4b 时改为 `--base Qwen/Qwen3-4B`）、[PEFT LoRA](https://huggingface.co/docs/peft/en/package_reference/lora)、[Ollama 模型导入](https://docs.ollama.com/import)。
+参考：[Qwen3.5-9B 模型](https://huggingface.co/Qwen/Qwen3.5-9B)、[PEFT LoRA](https://huggingface.co/docs/peft/en/package_reference/lora)、[Ollama 模型导入](https://docs.ollama.com/import)。

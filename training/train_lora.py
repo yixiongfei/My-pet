@@ -43,7 +43,7 @@ def encode_sample(tokenizer, messages, max_length):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("data", type=Path)
-    parser.add_argument("--base", default="Qwen/Qwen3.5-9B", help="Hugging Face base matching the Ollama model in use (qwen3:4b -> Qwen/Qwen3-4B)")
+    parser.add_argument("--base", default="Qwen/Qwen3.5-9B", help="Hugging Face base matching the Ollama model in use")
     parser.add_argument("--output", type=Path, default=Path("training/output/vpet-lora"))
     parser.add_argument("--validate-only", action="store_true", help="Validate JSONL only; no ML packages or model downloads needed")
     parser.add_argument("--allow-cpu", action="store_true", help="Explicitly opt into slow CPU training")
