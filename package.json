@@ -1,0 +1,23 @@
+{
+  "name": "vpet-agent",
+  "private": true,
+  "version": "0.0.1",
+  "description": "VPet 重构：有身体的 Personal Agent（Tauri 2 + React + Rust core + TS brain）",
+  "packageManager": "pnpm@12.4.2",
+  "scripts": {
+    "build:assets": "node scripts/build-assets.mjs",
+    "dev": "pnpm --filter @vpet/desktop tauri dev",
+    "dev:onnx": "pnpm --filter @vpet/desktop tauri dev -- --features embed",
+    "build:local": "pnpm --filter @vpet/desktop tauri build --no-bundle",
+    "build:icon": "node scripts/build-icon.mjs && pnpm --filter @vpet/desktop tauri icon public/avatar.png --output src-tauri/icons",
+    "build": "pnpm --filter @vpet/desktop tauri build",
+    "web": "pnpm --filter @vpet/desktop dev",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -CheckOnly",
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.3",
+    "typescript": "^5.9.2"
+  }
+}

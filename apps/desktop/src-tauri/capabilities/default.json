@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "桌宠与独立对话窗口：订阅 Core 事件",
+  "windows": ["pet", "chat"],
+  "permissions": [
+    "core:default"
+  ]
+}

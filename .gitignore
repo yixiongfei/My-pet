@@ -1,0 +1,34 @@
+# deps / build
+node_modules/
+dist/
+target/
+*.tsbuildinfo
+
+# 资产构建产物（由 scripts/build-assets.mjs 从 assets-src/ 生成）
+apps/desktop/public/pet/
+
+# 角色美术归原版作者，只在本机使用（见 assets-src/README.md）；
+# legacy/ 是原版 C# 工程的只读参考，从上游克隆即可
+assets-src/*
+!assets-src/README.md
+legacy/
+
+# tauri
+apps/desktop/src-tauri/gen/schemas/
+
+# local
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+
+# Claude 桌面端的本地预览配置
+.claude/launch.json
+
+# Local model runtime, model weights and private training output
+.runtime/
+training/data/
+training/output/
+training/.venv/
+__pycache__/
