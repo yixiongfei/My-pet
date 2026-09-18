@@ -1,6 +1,10 @@
 import { invokeCore } from './ipc'
 
 export type SpeechKind = 'chat' | 'line'
+export type SpeechEmotion = 'neutral' | 'happy' | 'excited' | 'caring' | 'sleepy' | 'annoyed' | 'sad' | 'shy'
+export type SpeechStyle = 'calm' | 'playful' | 'warm' | 'serious' | 'teasing' | 'soft'
+/** LLM 的内部表演提示。只透传给 Core，不进气泡；Core 还会用真实 PetState 覆盖不合理表演。 */
+export interface SpeechCue { emotion: SpeechEmotion; energy: number; style: SpeechStyle }
 
 export interface VoicePrefs {
   enabled: boolean
@@ -54,14 +58,14 @@ export class Speech {
    * 排一句。`interrupt` = 把还没说完的都扔掉（新的回复来了，旧的就别念了）。
    * 不允许出声的类型直接忽略——气泡照出，只是没声音
    */
-  say(text: string, kind: SpeechKind, opts: { interrupt?: boolean; mood?: string; volume?: number; style?: string } = {}): void {
+  say(text: string, kind: SpeechKind, opts: { interrupt?: boolean; mood?: string; volume?: number; style?: string; speech?: SpeechCue } = {}): void {
     if (this.disposed || !this.allows(kind)) return
     const clean = text.trim()
     if (!clean) return
     if (opts.interrupt) this.interrupt()
     // 台词类的话别打断正在念的对话回复，也别排一长串：正在说就算了
     if (kind === 'line' && (this.current || this.queue.length)) return
-    const audio = invokeCore<ArrayBuffer>('tts_speak', { text: clean, mood: opts.mood })
+    const audio = invokeCore<ArrayBuffer>('tts_speak', { text: clean, mood: opts.mood, speech: opts.speech })
       .then((buf) => (buf && buf.byteLength > 44 ? new Blob([buf], { type: 'audio/wav' }) : null))
       .catch(() => null)
     this.queue.push({ kind, audio, volume: Math.min(1, Math.max(0, opts.volume ?? 1)), style: opts.style })

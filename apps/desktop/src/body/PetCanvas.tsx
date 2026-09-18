@@ -11,7 +11,7 @@ import { loadManifest, loadProfile } from './manifest'
 import { fetchPetState, subscribePetState } from './petState'
 import { exitPetSide, openChat, openSettingsPanel, pushFoodCatalog, pushHitMask, pushMotionProfile, reportTouch } from './petWindow'
 import { hideDelayMs } from './say'
-import { Speech } from './speech'
+import { Speech, type SpeechCue } from './speech'
 import { toLogical } from './touch'
 
 /** 话在念的时候气泡不收；念完再留一会儿。合成加播放最长也就这么久，兜底 */
@@ -70,7 +70,7 @@ export function PetCanvas() {
   }, [])
   const [streaming, setStreaming] = useState(false)
   /** 正在流式收的那条回复：文本 + 已经送去念到哪了 */
-  const streamRef = useRef<{ id: string; text: string; spoken: number } | null>(null)
+  const streamRef = useRef<{ id: string; text: string; spoken: number; speech?: SpeechCue } | null>(null)
   const [hovered, setHovered] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [focus, setFocus] = useState<FocusTimer | null>(null)
@@ -118,7 +118,7 @@ export function PetCanvas() {
    * 前一句在念的时候后一句已经在合成了，不用等整段回复结束
    */
   const onChatStream = useCallback((payload: unknown) => {
-    const event = payload as { requestId?: string; delta?: string; done?: boolean; text?: string; reset?: boolean } | null
+    const event = payload as { requestId?: string; delta?: string; done?: boolean; text?: string; reset?: boolean; speech?: SpeechCue } | null
     if (!event?.requestId) return
     const speech = speechRef.current
     let current = streamRef.current
@@ -146,7 +146,7 @@ export function PetCanvas() {
       // 还没念的尾巴：最终文本和流式文本的开头一致才接着念，否则（旁白被裁掉了）只念还没念过的部分
       const spokenPrefix = current.text.slice(0, current.spoken)
       const rest = text.startsWith(spokenPrefix) ? text.slice(current.spoken) : current.spoken === 0 ? text : ''
-      if (rest.trim()) speech?.say(rest, 'chat', { style: sayStyleForChat(text) })
+      if (rest.trim()) speech?.say(rest, 'chat', { style: sayStyleForChat(text), speech: event.speech ?? current.speech })
       return
     }
     window.clearTimeout(hideTimer.current)
@@ -154,11 +154,11 @@ export function PetCanvas() {
     if ((event.delta ?? '').length > 0) interactionRef.current?.endThink()
     if (fresh) speech?.interrupt() // 新的回复来了，旧的别念了
     const next = !current || fresh
-      ? { id: event.requestId, text: event.delta ?? '', spoken: 0 }
-      : { id: event.requestId, text: current.text + (event.delta ?? ''), spoken: current.spoken }
+      ? { id: event.requestId, text: event.delta ?? '', spoken: 0, speech: event.speech }
+      : { id: event.requestId, text: current.text + (event.delta ?? ''), spoken: current.spoken, speech: event.speech ?? current.speech }
     const { ready } = Speech.splitSentences(next.text.slice(next.spoken))
     for (const sentence of ready) {
-      speech?.say(sentence, 'chat', { style: sayStyleForChat(sentence) })
+      speech?.say(sentence, 'chat', { style: sayStyleForChat(sentence), speech: next.speech })
       next.spoken += sentence.length
     }
     streamRef.current = next

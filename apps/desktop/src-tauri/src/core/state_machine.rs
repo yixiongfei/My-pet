@@ -804,12 +804,12 @@ pub fn decide_with_pin<'a>(
         }
     }
 
-    // 2b. 正事和玩：这三类才听用户的。按偏好重排（稳定排序，没偏好时就是原来的顺序），
+    // 2b. 正事和玩：这三类才听用户的。按偏好重排（稳定排序，没偏好时休闲优先），
     //     正偏置够大的还能越出自己的时段——「多工作」会让她晚上也想干活
     let mut lanes = [
+        ("play", "该放松一下", "你说要多玩会儿"),
         ("work", "上班时间", "你说要多工作"),
         ("study", "该学习了", "你说要多学习"),
-        ("play", "该放松一下", "你说要多玩会儿"),
     ];
     lanes.sort_by(|x, y| {
         biases
@@ -824,9 +824,10 @@ pub fn decide_with_pin<'a>(
         }
         let spill = w >= SPILL;
         if let Some(a) = best(cat, tag, |a| {
-            a.is_scheduled() && (spill || a.fits_hour(hour)) && ok(a)
+            (spill || (a.is_scheduled() && a.fits_hour(hour))) && ok(a)
         }) {
-            let reason = if a.fits_hour(hour) { why } else { biased_why };
+            let in_schedule = a.is_scheduled() && a.fits_hour(hour);
+            let reason = if in_schedule { why } else { biased_why };
             return (a, reason);
         }
     }
@@ -1232,9 +1233,40 @@ mod tests {
         let c = cat();
         let mut p = Pet::default();
         p.state.money = 9999.0; // 不缺钱，免得跑去工作
+        p = reduce(
+            &c,
+            &shelf(),
+            &p,
+            &Event::Request { target: "study".into(), roll: 0.0, minutes: None },
+        );
+        assert_eq!(p.state.activity, Activity::Studying, "用户主动开始学习时才跟着学");
         let p = run(&c, p, 40, 20.0);
-        assert!(p.state.exp > 0.0, "晚上学习该涨经验");
+        assert!(p.state.exp > 0.0, "主动学习期间该涨经验");
         assert!(p.state.level > 0, "经验够了该升级");
+    }
+
+    #[test]
+    fn 默认作息休闲多于工作_也不会自己抢时间学习() {
+        let c = cat();
+        let mut p = Pet::default();
+        p.state.money = 9999.0; // 不让「缺钱」需求干扰作息分布
+        let mut leisure = 0;
+        let mut focused = 0;
+        let mut studied = 0;
+        for minute in 0..15 * 60 {
+            let hour = 8.0 + minute as f32 / 60.0;
+            p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour });
+            match p.state.activity {
+                Activity::Idle | Activity::Break | Activity::Playing => leisure += 1,
+                Activity::Working | Activity::Studying => focused += 1,
+                _ => {}
+            }
+            if p.state.activity == Activity::Studying {
+                studied += 1;
+            }
+        }
+        assert!(leisure > focused, "默认一天休闲 {leisure} 分钟，正事却有 {focused} 分钟");
+        assert_eq!(studied, 0, "用户没开口时不该自动拿学习挤掉休闲");
     }
 
     #[test]
@@ -1967,13 +1999,14 @@ mod tests {
     fn 发呆的时候到点了会起来做事() {
         let c = cat();
         let mut p = Pet::default();
-        p.state.money = 9999.0; // 不缺钱：八点半没别的事，只能发呆
+        p.state.money = 9999.0; // 不缺钱：把早饭和玩耍冷却后，十点前只能发呆
         p.cooldowns.insert("meal".into(), 100.0);
-        p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 8.5 });
-        assert_eq!(p.state.action.as_ref().unwrap().id, "rest", "前提：八点半闲着");
-        // 九点是上班时间。以前这里会一直发呆到某个数值见底
-        let later = run(&c, p, 40, 8.5);
-        assert_eq!(later.state.activity, Activity::Working, "九点了还在发呆");
+        p.cooldowns.insert("play_game".into(), 100.0);
+        p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 9.5 });
+        assert_eq!(p.state.action.as_ref().unwrap().id, "rest", "前提：九点半闲着");
+        // 十点是缩短后的上班时间。以前这里会一直发呆到某个数值见底
+        let later = run(&c, p, 40, 9.5);
+        assert_eq!(later.state.activity, Activity::Working, "十点了还在发呆");
     }
 
     #[test]

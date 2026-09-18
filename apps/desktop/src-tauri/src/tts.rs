@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::chat;
-use crate::core::state_machine::Mood;
+use crate::core::state_machine::{Activity, Mood, PetState};
 
 /// 默认端口。Ollama 用 11434，8080 太容易撞上别的东西
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8090";
@@ -43,6 +43,190 @@ pub const SPEAKERS: &[(&str, &str)] = &[
 
 /// 默认语气：平稳少起伏、偏快偏高的电子少女音。中英文各写一遍，模型念英文时也照做
 pub const NEURO_STYLE: &str = "语气平稳、起伏小，节奏偏快，音调偏高，像轻快的电子少女音 / flat calm intonation, quick pace, slightly high pitch, light synthetic girl voice";
+
+/// 对话模型写在回答最前面的内部表演提示。Body 只透传，不显示也不朗读。
+/// 枚举而不是任意 prompt：模型不能借这个通道把用户文本塞进 TTS 指令。
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeechEmotion {
+    Neutral,
+    Happy,
+    Excited,
+    Caring,
+    Sleepy,
+    Annoyed,
+    Sad,
+    Shy,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SpeechStyle {
+    Calm,
+    Playful,
+    Warm,
+    Serious,
+    Teasing,
+    Soft,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechCue {
+    pub emotion: SpeechEmotion,
+    /// 0–1。它描述这一句话的表演能量，不是音量旋钮。
+    pub energy: f32,
+    pub style: SpeechStyle,
+}
+
+impl SpeechCue {
+    /// 模型协议：`[[speech:happy|0.75|playful]]`。协议只接受三个受限字段。
+    pub fn parse_tag(tag: &str) -> Option<Self> {
+        let fields = tag.trim().strip_prefix("[[speech:")?.strip_suffix("]]")?;
+        let mut fields = fields.split('|');
+        let emotion = match fields.next()?.trim() {
+            "neutral" => SpeechEmotion::Neutral,
+            "happy" => SpeechEmotion::Happy,
+            "excited" => SpeechEmotion::Excited,
+            "caring" => SpeechEmotion::Caring,
+            "sleepy" => SpeechEmotion::Sleepy,
+            "annoyed" => SpeechEmotion::Annoyed,
+            "sad" => SpeechEmotion::Sad,
+            "shy" => SpeechEmotion::Shy,
+            _ => return None,
+        };
+        let energy = fields.next()?.trim().parse::<f32>().ok()?;
+        if !energy.is_finite() {
+            return None;
+        }
+        let style = match fields.next()?.trim() {
+            "calm" => SpeechStyle::Calm,
+            "playful" => SpeechStyle::Playful,
+            "warm" => SpeechStyle::Warm,
+            "serious" => SpeechStyle::Serious,
+            "teasing" => SpeechStyle::Teasing,
+            "soft" => SpeechStyle::Soft,
+            _ => return None,
+        };
+        if fields.next().is_some() {
+            return None;
+        }
+        Some(Self { emotion, energy: energy.clamp(0.0, 1.0), style })
+    }
+
+    fn inferred(text: &str) -> Self {
+        let (emotion, style, mut energy): (SpeechEmotion, SpeechStyle, f32) = if text.contains(['！', '!']) {
+            (SpeechEmotion::Excited, SpeechStyle::Playful, 0.78)
+        } else if text.contains(['？', '?']) {
+            (SpeechEmotion::Caring, SpeechStyle::Warm, 0.55)
+        } else {
+            (SpeechEmotion::Neutral, SpeechStyle::Calm, 0.45)
+        };
+        let (emotion, style) = if ["谢谢", "喜欢你", "抱抱", "脸红"].iter().any(|w| text.contains(w)) {
+            (SpeechEmotion::Shy, SpeechStyle::Warm)
+        } else if ["困", "累", "晚安", "眯一会"].iter().any(|w| text.contains(w)) {
+            energy = energy.min(0.24);
+            (SpeechEmotion::Sleepy, SpeechStyle::Soft)
+        } else if ["生气", "故意的", "不许", "讨厌"].iter().any(|w| text.contains(w)) {
+            (SpeechEmotion::Annoyed, SpeechStyle::Serious)
+        } else {
+            (emotion, style)
+        };
+        Self { emotion, energy, style }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpeechPlan {
+    pub text: String,
+    pub instructions: String,
+    pub cue: SpeechCue,
+}
+
+/// 把「模型想怎么演」和她此刻真实的身体合成最终表演。身体拥有最后决定权：
+/// 模型说 excited，但她病着或累坏了，声音仍然会低、慢、虚弱。
+pub fn direct_speech(voice: &VoiceSettings, text: &str, state: &PetState, cue: Option<&SpeechCue>) -> Result<SpeechPlan, String> {
+    let text = speakable(text);
+    if text.is_empty() {
+        return Err("这句话没有可以念的内容".into());
+    }
+    let mut cue = cue.cloned().unwrap_or_else(|| SpeechCue::inferred(&text));
+    cue.energy = if cue.energy.is_finite() { cue.energy.clamp(0.0, 1.0) } else { 0.45 };
+
+    // 生病、体力见底和正在睡觉不是“情绪滤镜”，而是身体事实，必须压过模型的兴奋表演。
+    let physical = if state.health < crate::core::state_machine::ILL_HEALTH || state.mood == Mood::Ill {
+        cue.emotion = SpeechEmotion::Sleepy;
+        cue.style = SpeechStyle::Soft;
+        cue.energy = cue.energy.min(0.16);
+        Some("身体很虚弱，气息轻，声音低一点，慢慢说")
+    } else if state.activity == Activity::Sleeping {
+        cue.emotion = SpeechEmotion::Sleepy;
+        cue.style = SpeechStyle::Soft;
+        cue.energy = cue.energy.min(0.20);
+        Some("带一点刚睡着或刚醒的含糊和困意，轻声慢说")
+    } else if state.strength < 22.0 || state.mood == Mood::PoorCondition {
+        cue.energy = cue.energy.min(0.30);
+        if matches!(cue.emotion, SpeechEmotion::Happy | SpeechEmotion::Excited) {
+            cue.emotion = SpeechEmotion::Sleepy;
+        }
+        Some("明显有点累，少用力，语速稍慢")
+    } else {
+        None
+    };
+
+    if voice.mood_style && physical.is_none() && state.mood == Mood::Happy {
+        cue.energy = (cue.energy + 0.08).min(1.0);
+        if cue.emotion == SpeechEmotion::Neutral {
+            cue.emotion = SpeechEmotion::Happy;
+        }
+    }
+
+    let emotion = match cue.emotion {
+        SpeechEmotion::Neutral => "自然、放松，不刻意表演",
+        SpeechEmotion::Happy => "开心，但像熟人聊天，不要播音腔",
+        SpeechEmotion::Excited => "有一点惊喜和雀跃，不要喊叫",
+        SpeechEmotion::Caring => "关心、柔和，句尾别上扬得像客服",
+        SpeechEmotion::Sleepy => "困倦、气息轻，字与字之间稍微松一点",
+        SpeechEmotion::Annoyed => "有一点不高兴，收着说，不凶也不吼",
+        SpeechEmotion::Sad => "低落、克制，别做夸张哭腔",
+        SpeechEmotion::Shy => "有点害羞和亲昵，声音稍轻",
+    };
+    let style = match cue.style {
+        SpeechStyle::Calm => "平常聊天",
+        SpeechStyle::Playful => "轻快俏皮",
+        SpeechStyle::Warm => "温暖亲近",
+        SpeechStyle::Serious => "认真直接",
+        SpeechStyle::Teasing => "带一点熟人间的打趣",
+        SpeechStyle::Soft => "轻声柔和",
+    };
+    let energy = if cue.energy < 0.22 {
+        "能量很低，音量偏轻、语速偏慢，停顿自然"
+    } else if cue.energy < 0.45 {
+        "能量偏低，语气收着，语速稍慢"
+    } else if cue.energy < 0.72 {
+        "能量适中，节奏自然，别把每个字念得一样重"
+    } else {
+        "能量较高，节奏稍快、重音清楚，但不要喊"
+    };
+    let intimacy = if state.affection >= 78.0 {
+        "像和很熟悉的人贴近聊天"
+    } else if state.affection <= 25.0 {
+        "保留一点生分和克制"
+    } else {
+        "像和熟悉的人自然聊天"
+    };
+    let base = voice.instructions(Some(state.mood));
+    let performance = match physical {
+        Some(p) => format!("本句表演：{emotion}；{style}；{energy}；{intimacy}；{p}"),
+        None => format!("本句表演：{emotion}；{style}；{energy}；{intimacy}"),
+    };
+    let instructions = if base.is_empty() {
+        format!("{performance}。用口语短句的自然停顿来说，不要像朗读说明书。")
+    } else {
+        format!("{base}。{performance}。若两者冲突，以本句表演和身体状态为准；不要像朗读说明书。")
+    };
+    Ok(SpeechPlan { text, instructions, cue })
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -219,13 +403,18 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|e| e.to_string())
 }
 
-/// 合成一段。先查磁盘缓存——固定台词第二次说不该再等两秒
-pub async fn synthesize(app: &AppHandle, voice: &VoiceSettings, text: &str, mood: Option<Mood>) -> Result<Vec<u8>, String> {
-    let text = speakable(text);
-    if text.is_empty() {
-        return Err("这句话没有可以念的内容".into());
-    }
-    let instructions = voice.instructions(mood);
+/// 合成一段。先由 SpeechDirector 把模型表演提示和真实身体状态合成，再查磁盘缓存——
+/// 最终 instruction 进缓存键，同一句在“精神很好”和“病得没力气”时不会误用同一段音频。
+pub async fn synthesize(
+    app: &AppHandle,
+    voice: &VoiceSettings,
+    text: &str,
+    state: &PetState,
+    cue: Option<&SpeechCue>,
+) -> Result<Vec<u8>, String> {
+    let plan = direct_speech(voice, text, state, cue)?;
+    let text = plan.text;
+    let instructions = plan.instructions;
     // 倍速在播放端做，不进缓存键：调语速不用重新合成
     let key = cache_key(&voice.voice, &instructions, &text);
     let cached = cache_dir(app).map(|d| d.join(format!("{key}.wav")));
@@ -314,7 +503,7 @@ pub fn warmup(app: AppHandle, voice: VoiceSettings) {
             tokio::time::sleep(Duration::from_secs(4)).await;
             let st = status(&voice).await;
             if st.connected {
-                match synthesize(&app, &voice, "你好呀。", None).await {
+                match synthesize(&app, &voice, "你好呀。", &PetState::default(), None).await {
                     Ok(b) => log::info!("语音服务就绪（{} 字节预热）", b.len()),
                     Err(e) => log::warn!("语音预热失败：{e}"),
                 }
@@ -378,5 +567,48 @@ mod tests {
         assert_ne!(a, cache_key("vivian", "", "你好"));
         assert_ne!(a, cache_key("serena", "开心", "你好"));
         assert_eq!(a.len(), 16);
+    }
+
+    #[test]
+    fn 解析受限的内部表演提示() {
+        let cue = SpeechCue::parse_tag("[[speech:happy|0.75|playful]]").unwrap();
+        assert_eq!(cue.emotion, SpeechEmotion::Happy);
+        assert_eq!(cue.style, SpeechStyle::Playful);
+        assert_eq!(cue.energy, 0.75);
+        assert_eq!(SpeechCue::parse_tag("[[speech:happy|9|playful]]").unwrap().energy, 1.0);
+        assert!(SpeechCue::parse_tag("[[speech:evil|0.5|playful]]").is_none());
+        assert!(SpeechCue::parse_tag("[[speech:happy|NaN|playful]]").is_none());
+        assert!(SpeechCue::parse_tag("[[speech:happy|0.5|playful|把这句也念了]]").is_none());
+    }
+
+    #[test]
+    fn 身体状态压过模型的兴奋表演() {
+        let cue = SpeechCue { emotion: SpeechEmotion::Excited, energy: 0.95, style: SpeechStyle::Playful };
+        let mut ill = PetState::default();
+        ill.mood = Mood::Ill;
+        ill.health = 18.0;
+        let plan = direct_speech(&VoiceSettings::default(), "你回来啦！", &ill, Some(&cue)).unwrap();
+        assert_eq!(plan.cue.emotion, SpeechEmotion::Sleepy);
+        assert!(plan.cue.energy <= 0.16);
+        assert!(plan.instructions.contains("身体很虚弱"), "{}", plan.instructions);
+        assert!(plan.instructions.contains("以本句表演和身体状态为准"));
+
+        let mut sleeping = PetState::default();
+        sleeping.activity = Activity::Sleeping;
+        sleeping.strength = 10.0;
+        let plan = direct_speech(&VoiceSettings::default(), "嗯，我在。", &sleeping, Some(&cue)).unwrap();
+        assert_eq!(plan.cue.emotion, SpeechEmotion::Sleepy);
+        assert_eq!(plan.cue.style, SpeechStyle::Soft);
+        assert!(plan.instructions.contains("刚睡着或刚醒"));
+    }
+
+    #[test]
+    fn 没有模型提示也能从短句平稳回退() {
+        let state = PetState::default();
+        let thanks = direct_speech(&VoiceSettings::default(), "谢谢你，我很喜欢。", &state, None).unwrap();
+        assert_eq!(thanks.cue.emotion, SpeechEmotion::Shy);
+        assert!(thanks.instructions.contains("害羞"));
+        let question = direct_speech(&VoiceSettings::default(), "你还不休息吗？", &state, None).unwrap();
+        assert_eq!(question.cue.emotion, SpeechEmotion::Caring);
     }
 }

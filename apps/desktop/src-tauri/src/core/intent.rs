@@ -87,6 +87,7 @@ pub fn parse(text: &str) -> Option<Intent> {
         .or_else(|| parse_focus(&t))
         .or_else(|| parse_timer(&t))
         .or_else(|| parse_bias_zh(&t))
+        .or_else(|| parse_user_study_start(&t))
         .or_else(|| parse_do_zh(&t))
         .or_else(|| parse_bias_en(&t))
         .or_else(|| parse_do_en(&t))
@@ -249,6 +250,28 @@ fn parse_do_zh(t: &str) -> Option<Intent> {
         return None; // 后面还有一大截，多半是在讲事情，不是一句命令
     }
     Some(Intent::Do { target: tag.into(), minutes })
+}
+
+/// 用户说「我要开始学习了」不是在使唤她，但是一个明确的「现在开学」信号：
+/// 她应该收起玩耍，跟着进入学习。仍返回 `Do` 走 request_action / 服从判定，
+/// 不直接写状态。只认很窄的当下开始句式，避免「我学习了一下午」这类回顾被误伤。
+fn parse_user_study_start(t: &str) -> Option<Intent> {
+    let s = strip_punct(t);
+    let s = s.trim_end_matches(|c| matches!(c, '呀' | '啊' | '哦' | '呢' | '嘛'));
+    let stem = s.strip_suffix('了').or_else(|| s.strip_suffix('啦')).unwrap_or(s);
+    [
+        "我要开始学习",
+        "我要去学习",
+        "我准备开始学习",
+        "我准备去学习",
+        "我准备学习",
+        "我开始去学习",
+        "我开始学习",
+        "我现在要开始学习",
+        "我现在开始学习",
+    ]
+    .contains(&stem)
+    .then_some(Intent::Do { target: "study".into(), minutes: None })
 }
 
 /// 从「玩十分钟吧」里抠出 10，返回 (分钟, 去掉时长后的剩余文本)
@@ -467,6 +490,21 @@ mod tests {
         assert_eq!(go("我想让你去学习"), Some(("study".into(), None)));
         assert_eq!(go("去午睡吧"), Some(("sleep".into(), None)));
         assert_eq!(go("玩去吧"), Some(("play".into(), None)));
+    }
+
+    #[test]
+    fn 用户明确开始学习时_她才跟着收起玩耍() {
+        for text in [
+            "我要开始学习了",
+            "我准备去学习啦",
+            "我开始学习了哦",
+            "我现在要开始学习",
+        ] {
+            assert_eq!(go(text), Some(("study".into(), None)), "没认出开学信号：{text}");
+        }
+        for text in ["我学习了一下午", "我在学习", "我要学习资料怎么找"] {
+            assert_eq!(go(text), None, "历史 / 状态 / 问题不该让她突然去学：{text}");
+        }
     }
 
     #[test]

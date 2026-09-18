@@ -46,7 +46,7 @@ duration = 540          # 一觉最多九小时：23 点躺下正好睡到 8 点
 cooldown = 600
 hours = [[23, 8]]       # 夜里该睡了。白天累趴了也会睡——那走的是「生理急需」那条路
 per_min = { strength = 1.0, hunger = -0.12, thirst = -0.15, feeling = 0.1 }
-lines = ["困了……晚安。", "今天也辛苦了，睡觉去。", "眼睛睁不开了，我去睡啦。"]
+lines = ["唔……困了。晚安。", "今天就到这里吧，睡觉啦。", "眼睛快睁不开了……我先睡。"]
 
 [[action]]
 id = "nap"
@@ -74,7 +74,7 @@ duration = 2
 cooldown = 150
 hours = [[7, 9], [11, 13], [17, 19]]   # 一日三餐
 per_min = { strength = 0.5, hunger = 25.0, thirst = -0.1, feeling = 1.0 }
-lines = ["到饭点啦，开吃！{food}～", "好饿，先吃{food}。", "吃饭时间到，今天是{food}。"]
+lines = ["到饭点啦。今天吃{food}～", "好饿……先吃口{food}。", "唔，{food}，开动啦。"]
 
 [[action]]
 id = "snack"
@@ -96,7 +96,7 @@ tags = ["drink", "need"]
 duration = 1
 cooldown = 40
 per_min = { strength = 0.2, hunger = -0.2, thirst = 35.0, feeling = 0.3 }
-lines = ["喝口水。", "有点渴，先喝点{food}。", "补充水分～"]
+lines = ["唔，喝口水。", "有点渴……先喝点{food}。", "咕嘟咕嘟……活过来了。"]
 
 # ---------- 工作：赚钱，掉心情 ----------
 
@@ -108,7 +108,7 @@ graph = "workone"
 tags = ["work", "earn"]
 duration = 60
 cooldown = 30
-hours = [[9, 12], [14, 18]]
+hours = [[10, 12], [15, 17]]   # 工作留在两个短时段，不再占满整个白天
 per_min = { strength = -0.3, hunger = -0.35, thirst = -0.25, feeling = -0.5 }
 earns = { money = 0.8 }
 finish = 0.1
@@ -123,7 +123,7 @@ graph = "grilledsausage"
 tags = ["work", "earn"]
 duration = 30
 cooldown = 40
-hours = [[9, 12], [14, 18]]
+hours = [[10, 12], [15, 17]]
 per_min = { strength = -0.3, hunger = 0.0, thirst = -0.5, feeling = -0.25 }
 earns = { money = 1.2 }
 finish = 0.15
@@ -138,12 +138,12 @@ graph = "workclean"
 tags = ["work", "earn"]
 duration = 90
 cooldown = 60
-hours = [[9, 12], [14, 18]]
+hours = [[10, 12], [15, 17]]
 per_min = { strength = -0.3, hunger = -0.5, thirst = -0.5, feeling = -0.875 }
 earns = { money = 1.6 }
 finish = 0.2
 requires = { level = 10, min_strength = 30, min_hunger = 25, min_thirst = 25 }
-lines = ["清屏工作，开始！", "我去把屏幕擦干净。"]
+lines = ["嗯……先把屏幕清一清。", "这里有点乱，我来收拾。"]
 
 [[action]]
 id = "work_stream"
@@ -153,7 +153,7 @@ graph = "worktwo"
 tags = ["work", "earn"]
 duration = 180
 cooldown = 120
-hours = [[14, 18], [20, 23]]
+hours = [[15, 17]]             # 晚间留给玩耍和放松
 per_min = { strength = -0.3, hunger = -0.5, thirst = -1.0, feeling = -1.25 }
 earns = { money = 2.8 }
 finish = 0.25
@@ -168,7 +168,7 @@ graph = "fixmenu"
 tags = ["work", "earn"]
 duration = 120
 cooldown = 120
-hours = [[9, 12], [14, 18]]
+hours = [[10, 12], [15, 17]]
 per_min = { strength = -0.3, hunger = -1.0, thirst = -0.8, feeling = -0.625 }
 earns = { money = 3.2 }
 finish = 0.25
@@ -176,6 +176,8 @@ requires = { level = 30, min_strength = 45, min_hunger = 40, min_thirst = 35 }
 lines = ["屏幕坏了？交给我修。", "修屏幕去了，等我一下。"]
 
 # ---------- 学习：涨经验，掉心情。等级上去了才能干更赚钱的活 ----------
+# 故意不写 hours：默认作息不会抢走玩耍 / 放松时间；用户主动说开始学习，
+# 或设了「多学习」偏好时，request / bias 仍会正常挑中这些动作。
 
 [[action]]
 id = "study_basic"
@@ -185,12 +187,11 @@ graph = "study"
 tags = ["study", "grow"]
 duration = 45
 cooldown = 60
-hours = [[9, 12], [19, 22]]
 per_min = { strength = -0.3, hunger = -0.2, thirst = -0.2, feeling = -1.0 }
 earns = { exp = 80.0 }
 finish = 0.2
 requires = { min_strength = 25, min_hunger = 20, min_thirst = 20 }
-lines = ["该学习了，我去看书。", "安静一会儿，我要学习了。", "今天也要学点新东西。"]
+lines = ["好啦，安静看会儿书。", "这一页……好像还挺有意思。", "再学一点点。"]
 
 [[action]]
 id = "study_calligraphy"
@@ -200,7 +201,6 @@ graph = "calligraphy"
 tags = ["study", "grow"]
 duration = 20
 cooldown = 90
-hours = [[19, 22]]
 # 原版这条漏了 MoneyBase（等于白学），按时长和难度补了一个
 per_min = { strength = -0.2, hunger = -0.1, thirst = -0.1, feeling = -0.5 }
 earns = { exp = 40.0 }
@@ -216,12 +216,11 @@ graph = "studytwo"
 tags = ["study", "grow"]
 duration = 75
 cooldown = 120
-hours = [[9, 12], [19, 22]]
 per_min = { strength = -0.3, hunger = -0.25, thirst = -0.35, feeling = -1.25 }
 earns = { exp = 120.0 }
 finish = 0.4
 requires = { level = 15, min_strength = 35, min_hunger = 25, min_thirst = 25 }
-lines = ["去做研究了，别打扰我哦。", "研究时间，专注模式开启。"]
+lines = ["这个……得认真想想。", "先别吵，我快想明白了。"]
 
 [[action]]
 id = "study_paint"
@@ -231,7 +230,6 @@ graph = "studypaint"
 tags = ["study", "grow"]
 duration = 120
 cooldown = 180
-hours = [[19, 22]]
 # 同样是原版漏了 MoneyBase
 per_min = { strength = -0.25, hunger = -0.22, thirst = -0.12, feeling = -0.45 }
 earns = { exp = 60.0 }
@@ -249,7 +247,7 @@ graph = "playone"
 tags = ["play", "cheer"]
 duration = 30
 cooldown = 45
-hours = [[12, 14], [19, 23]]
+hours = [[8, 10], [12, 15], [17, 23]]
 per_min = { strength = -0.2, hunger = -0.1, thirst = -0.15, feeling = 1.0 }
 requires = { min_strength = 15 }
 lines = ["打会儿游戏放松一下！", "游戏时间到～", "玩一会儿再说。"]
@@ -262,7 +260,7 @@ graph = "removeobject"
 tags = ["play", "cheer"]
 duration = 60
 cooldown = 60
-hours = [[19, 23]]
+hours = [[17, 23]]
 per_min = { strength = -0.2, hunger = -0.05, thirst = -0.05, feeling = 0.5 }
 requires = { level = 6, min_strength = 20 }
 lines = ["删 bug 最解压了，嘿嘿。", "去清理错误咯。"]
@@ -275,11 +273,11 @@ graph = "ropeskipping"
 tags = ["play", "exercise"]
 duration = 10
 cooldown = 120
-hours = [[7, 9], [17, 19]]
+hours = [[8, 10], [17, 19]]
 # 原版把跳绳算成「累」（Feeling 是正的 0.5 → 心情下降）。想让运动提神就把这个数改成正的
 per_min = { strength = -0.5, hunger = -0.1, thirst = -0.1, feeling = -0.5 }
 requires = { level = 12, min_strength = 30 }
-lines = ["跳绳运动一下！", "活动活动，跳几下。"]
+lines = ["坐久了，跳几下。", "一、二……活动一下。"]
 
 [[action]]
 id = "play_water"
@@ -289,7 +287,7 @@ graph = "playwater"
 tags = ["play", "cheer"]
 duration = 20
 cooldown = 90
-hours = [[12, 14], [19, 23]]
+hours = [[12, 15], [17, 23]]
 per_min = { strength = -0.2, hunger = -0.05, thirst = 0.0, feeling = 1.0 }
 requires = { level = 18, min_strength = 20 }
 lines = ["去玩水啦～", "玩水时间，好凉快。"]
@@ -307,7 +305,7 @@ tags = ["gift"]
 duration = 3
 cooldown = 0
 per_min = { strength = 0.2, hunger = 0.0, thirst = 0.0, feeling = 0.0 }
-lines = ["送给我的「{food}」吗？谢谢你，我很喜欢！", "哇，{food}！你怎么知道我想要这个。", "谢谢你的{food}，我会好好珍惜的。"]
+lines = ["给我的？……谢谢。", "哇，是{food}！你怎么知道。", "{food}……我会好好收着的。"]
 
 # ---------- 放歌：你在放音乐（Spotify 在播）她就跟着跳 ----------
 # 不排时段：`Pet.music` 为真时 decide 直接挑它（排在吃饭睡觉之后、上班之前），歌停了就放下。

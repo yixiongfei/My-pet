@@ -1952,21 +1952,28 @@ fn give_medicine(app: AppHandle, id: Option<String>) -> Result<String, String> {
 
 /* ==================== 语音与台词 ==================== */
 
-/// 合成一句话，返回 WAV 字节。Body 拿去播。`mood` 不给就按她此刻的心情挑语气
+/// 合成一句话，返回 WAV 字节。Body 拿去播。`speech` 是模型给的受限表演提示，
+/// 最终语气仍由 Core 的 SpeechDirector 结合真实身体状态决定。
 #[tauri::command]
-async fn tts_speak(app: AppHandle, text: String, mood: Option<String>) -> Result<tauri::ipc::Response, String> {
+async fn tts_speak(
+    app: AppHandle,
+    text: String,
+    mood: Option<String>,
+    speech: Option<tts::SpeechCue>,
+) -> Result<tauri::ipc::Response, String> {
     let settings = chat::current_settings(&app)?;
     if !settings.voice.enabled {
         return Err("语音已关闭".into());
     }
-    let mood = match mood.as_deref() {
-        Some("happy") => Some(core::state_machine::Mood::Happy),
-        Some("nomal") => Some(core::state_machine::Mood::Nomal),
-        Some("poorcondition") => Some(core::state_machine::Mood::PoorCondition),
-        Some("ill") => Some(core::state_machine::Mood::Ill),
-        _ => Some(pet_snapshot(&app).mood),
+    let mut state = pet_snapshot(&app);
+    state.mood = match mood.as_deref() {
+        Some("happy") => core::state_machine::Mood::Happy,
+        Some("nomal") => core::state_machine::Mood::Nomal,
+        Some("poorcondition") => core::state_machine::Mood::PoorCondition,
+        Some("ill") => core::state_machine::Mood::Ill,
+        _ => state.mood,
     };
-    let bytes = tts::synthesize(&app, &settings.voice, &text, mood).await?;
+    let bytes = tts::synthesize(&app, &settings.voice, &text, &state, speech.as_ref()).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 

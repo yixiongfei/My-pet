@@ -18,7 +18,7 @@ use tokio::sync::watch;
 use crate::core::intent::{self, Intent};
 use crate::core::state_machine::{Mood, PetState};
 use crate::lines::LineSettings;
-use crate::tts::VoiceSettings;
+use crate::tts::{SpeechCue, VoiceSettings};
 
 const MAX_USER_CHARS: usize = 4_000;
 const MAX_CONTEXT_CHARS: usize = 10_000;
@@ -110,6 +110,9 @@ struct StreamEvent {
     /// 重来一次：前面流出来的字全部作废（模型没进角色那次）
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     reset: bool,
+    /// 只给 SpeechDirector 的内部表演提示；气泡和历史都不展示它。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speech: Option<SpeechCue>,
 }
 
 #[derive(Clone, Serialize)]
@@ -257,6 +260,9 @@ impl ChatStore {
             let (original, correction, prompt) = row.map_err(db_error)?;
             let mut messages: Vec<ModelMessage> = serde_json::from_str(&prompt)
                 .map_err(|e| format!("训练样本上下文损坏：{e}"))?;
+            // speech cue 是运行时控制面，不是角色台词。快照里的线上 system prompt 要求模型
+            // 先写 cue，但导出的 assistant 目标只有正文；不移除会训练出自相矛盾的样本。
+            strip_speech_protocol_for_training(&mut messages);
             let content = correction.unwrap_or(original);
             if content.trim().is_empty() || messages.first().map(|m| m.role.as_str()) != Some("system") {
                 continue;
@@ -272,6 +278,14 @@ impl ChatStore {
         }
         Ok(samples)
     }
+}
+
+fn strip_speech_protocol_for_training(messages: &mut [ModelMessage]) {
+    let Some(system) = messages.first_mut().filter(|m| m.role == "system") else { return };
+    system.content = system.content.lines()
+        .filter(|line| !line.contains("[[speech:emotion|energy|style]]"))
+        .collect::<Vec<_>>()
+        .join("\n");
 }
 
 fn row_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
@@ -467,12 +481,14 @@ fn system_prompt(settings: &ChatSettings, memories: &str, now: &Situation) -> St
     let mut prompt = format!(
         "# 角色卡\n名字：{}\n背景：{}\n形象：{}\n性格：{}\n说话方式：{}\n\n\
          # 规则\n\
-         - 你就是{}，住在用户的电脑桌面上，直接和用户说话。输出只包含{}说出口的话，不要分析、不要计划、不要解释自己在做什么。\n\
+         - 你就是{}，住在用户的电脑桌面上，直接和用户说话。除最后一条要求的内部语音标记外，输出只包含{}说出口的话；不要分析、不要计划、不要解释自己在做什么。\n\
          - 回应用户刚才具体说的内容，不复述设定。可以有自己的观点和感受。\n\
+         - 日常聊天优先用短而能直接说出口的句子；长内容也要拆成自然停顿的小句。少用「根据目前状态」「我认为你应该」这类助手腔，语气词只在自然时偶尔用。\n\
          - 不编造现实经历、已执行的操作或你不知道的用户信息。除了「此刻」里写明的事，你不能打开软件、发消息、设提醒或训练自己。\n\
          - 用户可以让你去玩、休息、工作、学习、吃饭、喝水、睡觉；答不答应由你的身体决定，结果会写在「此刻」里。只有那里写了，才说自己去做了或没答应；没写就不要声称自己做了什么。\n\
          - 被问到身份时坦率说自己是虚拟伙伴。没有明确的记忆命令时，不要声称已经永久记住了什么。\n\
-         - 形象描述只用于对话，桌面立绘不会因此改变。",
+         - 形象描述只用于对话，桌面立绘不会因此改变。\n\
+         - 每次回答第一行先写内部语音标记 `[[speech:emotion|energy|style]]`，下一行才是台词。emotion 只能是 neutral/happy/excited/caring/sleepy/annoyed/sad/shy；energy 是 0 到 1；style 只能是 calm/playful/warm/serious/teasing/soft。例如 `[[speech:happy|0.72|playful]]`。标记不是台词，不解释它。",
         p.name, p.background, p.appearance, p.personality, p.speaking_style, p.name, p.name,
     );
     if !now.state.is_empty() {
@@ -494,18 +510,52 @@ fn wire_messages(prompt: &[ModelMessage], name: &str) -> Vec<ModelMessage> {
 
 fn reply_prefix(name: &str) -> String { format!("{name}：") }
 
+/// 把内部表演标签从正文里剥掉，并保留首个合法 cue；位置可以出现在前面或后面。
+fn strip_speech_tags(text: &str) -> (String, Option<SpeechCue>) {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    let mut cue = None;
+    while let Some(start) = text[cursor..].find("[[speech:") {
+        let start = cursor + start;
+        out.push_str(&text[cursor..start]);
+        let rest = &text[start..];
+        match rest.find("]]") {
+            Some(end) => {
+                let tag = &rest[..end + 2];
+                if cue.is_none() {
+                    cue = SpeechCue::parse_tag(tag);
+                }
+                cursor = start + end + 2;
+            }
+            None => match rest.find('\n') {
+                Some(newline) => {
+                    cursor = start + newline + 1;
+                }
+                None => return (out, cue),
+            },
+        }
+    }
+    out.push_str(&text[cursor..]);
+    (out, cue)
+}
+
 /// 模型偶尔会在说完话之后拖出一段元注释（「（注意：…）」「我需要…」）或 `<think>`。
-/// 逐行扫，碰到第一行像旁白的就从那里截断；名字前缀重复了也去掉
+/// 逐行扫，碰到第一行像旁白的就从那里截断；名字和内部语音标记也去掉。
 fn clean_reply(raw: &str, name: &str) -> String {
+    clean_reply_with_speech(raw, name).0
+}
+
+fn clean_reply_with_speech(raw: &str, name: &str) -> (String, Option<SpeechCue>) {
     // qwen3.x 在 think=false 下偶尔还是会先吐一个空的 <think></think>；
     // 以前把 <think> 当停止词，模型一开口就被截成空回答。现在整段抠掉再往下走
     let without_think = strip_think(raw);
-    let mut text = without_think.trim_start();
+    let (without_tags, speech) = strip_speech_tags(&without_think);
+    let mut text = without_tags.trim_start();
     for prefix in [reply_prefix(name), format!("{name}:")] {
         if let Some(rest) = text.strip_prefix(prefix.as_str()) { text = rest.trim_start(); }
     }
     if looks_like_meta(text) {
-        return String::new();
+        return (String::new(), speech);
     }
     let mut kept = String::new();
     for line in text.lines() {
@@ -515,7 +565,128 @@ fn clean_reply(raw: &str, name: &str) -> String {
     }
     // 旁白标记贴在句尾（模型学着用户消息的格式）也截掉
     let kept = match kept.find("[旁白") { Some(i) => kept[..i].to_string(), None => kept };
-    drop_open_paren_tail(kept.trim()).trim().to_string()
+    (drop_open_paren_tail(kept.trim()).trim().to_string(), speech)
+}
+
+/// 流式阶段先攒住开头，确认内部标记已经完整后才把真正台词往 UI / TTS 发。
+/// 老模型不输出标记时，第一个普通文字一到就直接回退，不增加整句等待。
+struct SpeechEnvelopeStream {
+    name: String,
+    pending: String,
+    decided: bool,
+    cue: Option<SpeechCue>,
+}
+
+impl SpeechEnvelopeStream {
+    fn new(name: &str) -> Self {
+        Self { name: name.into(), pending: String::new(), decided: false, cue: None }
+    }
+
+    fn push(&mut self, delta: &str) -> String {
+        if self.decided {
+            return strip_speech_tags(delta).0;
+        }
+        self.pending.push_str(delta);
+        let (clean, cue) = strip_speech_tags(&self.pending);
+        self.pending = clean;
+        if let Some(cue) = cue {
+            self.cue = Some(cue);
+        }
+        match leading_envelope(&self.pending, &self.name) {
+            EnvelopeStart::Wait => String::new(),
+            EnvelopeStart::Ready { start, cue } => {
+                self.decided = true;
+                if self.cue.is_none() { self.cue = cue; }
+                self.pending[start..].to_string()
+            }
+        }
+    }
+
+    fn finish(&mut self) -> String {
+        if self.decided {
+            return String::new();
+        }
+        let (clean, cue) = strip_speech_tags(&self.pending);
+        self.pending = clean;
+        if let Some(cue) = cue {
+            self.cue = Some(cue);
+        }
+        match leading_envelope(&self.pending, &self.name) {
+            EnvelopeStart::Ready { start, cue } => {
+                self.decided = true;
+                if self.cue.is_none() { self.cue = cue; }
+                self.pending[start..].to_string()
+            }
+            // 半截控制标记宁可不显示：最终清理会判为空并走一次重试，绝不能念出协议。
+            EnvelopeStart::Wait if self.pending.contains("[[speech") => String::new(),
+            EnvelopeStart::Wait => {
+                self.decided = true;
+                std::mem::take(&mut self.pending)
+            }
+        }
+    }
+}
+
+enum EnvelopeStart {
+    Wait,
+    Ready { start: usize, cue: Option<SpeechCue> },
+}
+
+fn leading_envelope(input: &str, name: &str) -> EnvelopeStart {
+    let mut at = input.len() - input.trim_start().len();
+    if at == input.len() {
+        return EnvelopeStart::Wait;
+    }
+
+    // 即使 think=false，Qwen 偶尔仍先吐一个空 think 块；流式 UI 也不能闪一下这段。
+    loop {
+        let rest = &input[at..];
+        if rest.starts_with("<think>") {
+            let Some(end) = rest.find("</think>") else { return EnvelopeStart::Wait };
+            at += end + "</think>".len();
+            at += input[at..].len() - input[at..].trim_start().len();
+            continue;
+        }
+        if "<think>".starts_with(rest) {
+            return EnvelopeStart::Wait;
+        }
+        break;
+    }
+
+    for prefix in [reply_prefix(name), format!("{name}:")] {
+        let rest = &input[at..];
+        if rest.starts_with(&prefix) {
+            at += prefix.len();
+            at += input[at..].len() - input[at..].trim_start().len();
+            break;
+        }
+        if prefix.starts_with(rest) {
+            return EnvelopeStart::Wait;
+        }
+    }
+
+    let rest = &input[at..];
+    const PREFIX: &str = "[[speech:";
+    if rest.starts_with(PREFIX) {
+        if let Some(end) = rest.find("]]") {
+            let end = end + 2;
+            let cue = SpeechCue::parse_tag(&rest[..end]);
+            at += end;
+            at += input[at..].len() - input[at..].trim_start().len();
+            return EnvelopeStart::Ready { start: at, cue };
+        }
+        // 格式写坏但已经换行：整条控制行丢掉，正文仍可平稳显示、用规则推断语气。
+        if let Some(newline) = rest.find('\n') {
+            at += newline + 1;
+            at += input[at..].len() - input[at..].trim_start().len();
+            return EnvelopeStart::Ready { start: at, cue: None };
+        }
+        return EnvelopeStart::Wait;
+    }
+    if PREFIX.starts_with(rest) {
+        return EnvelopeStart::Wait;
+    }
+    EnvelopeStart::Ready { start: at, cue: None }
 }
 
 /// 结尾一个没闭合的括号（「……我都准备好啦！\n\n(好奇」）是模型开了个动作描写就停了，
@@ -648,7 +819,7 @@ impl Drop for RequestGuard {
             }
         }
         let _ = self.app.emit("chat:thinking", ThinkingEvent { request_id: self.id.clone(), active: false });
-        let _ = self.app.emit("chat-stream", StreamEvent { request_id: self.id.clone(), delta: String::new(), done: true, text: None, reset: false });
+        let _ = self.app.emit("chat-stream", StreamEvent { request_id: self.id.clone(), delta: String::new(), done: true, text: None, reset: false, speech: None });
     }
 }
 
@@ -689,14 +860,14 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
     if let Some(reply) = crate::quiet_command(&app, &text) {
         let response = message(format!("{request_id}-assistant"), "assistant", reply, "intent", "complete");
         with_store(&app, |store| store.insert(&response, None))?;
-        let _ = app.emit("chat-stream", StreamEvent { request_id, delta: response.content.clone(), done: false, text: None, reset: false });
+        let _ = app.emit("chat-stream", StreamEvent { request_id, delta: response.content.clone(), done: false, text: None, reset: false, speech: None });
         return Ok(response);
     }
     // This deterministic command path must run before ordinary model inference.
     if let Some(reply) = crate::memory_command(app.clone(), text.clone()) {
         let response = message(format!("{request_id}-assistant"), "assistant", reply, "memory", "complete");
         with_store(&app, |store| store.insert(&response, None))?;
-        let _ = app.emit("chat-stream", StreamEvent { request_id, delta: response.content.clone(), done: false, text: None, reset: false });
+        let _ = app.emit("chat-stream", StreamEvent { request_id, delta: response.content.clone(), done: false, text: None, reset: false, speech: None });
         return Ok(response);
     }
     // 「去玩会儿」「休息一下吧」：先进状态机过服从判定，再把结果告诉模型，
@@ -725,9 +896,16 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
     let prompt = wire_messages(&build_prompt(&settings, &memories, &history, &text, &now), &settings.persona.name);
     let client = chat_state(&app)?.client.clone();
     let mut output = String::new();
+    let mut envelope = SpeechEnvelopeStream::new(&settings.persona.name);
     let mut result = {
         let generation = generate(&client, &settings, &prompt, &mut output, |delta| {
-            let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: delta.into(), done: false, text: None, reset: false });
+            let visible = envelope.push(delta);
+            if !visible.is_empty() {
+                let _ = app.emit("chat-stream", StreamEvent {
+                    request_id: request_id.clone(), delta: visible, done: false, text: None,
+                    reset: false, speech: envelope.cue.clone(),
+                });
+            }
         });
         tokio::select! {
             biased;
@@ -735,19 +913,35 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
             result = generation => Some(result),
         }
     };
+    if matches!(result, Some(Ok(()))) {
+        let tail = envelope.finish();
+        if !tail.is_empty() {
+            let _ = app.emit("chat-stream", StreamEvent {
+                request_id: request_id.clone(), delta: tail, done: false, text: None,
+                reset: false, speech: envelope.cue.clone(),
+            });
+        }
+    }
     // 模型偶尔不进角色，整段都在盘算怎么回（「作为虚拟伙伴，我需要……」）。
     // 直接判失败会让用户看到红字；重来一次，把「直接开口」贴在用户消息后面，一般第二次就好了
     if matches!(result, Some(Ok(()))) && clean_reply(&output, &settings.persona.name).is_empty() {
         log::warn!("模型没进角色，重来一次：{:?}", output.chars().take(60).collect::<String>());
-        let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: String::new(), done: false, text: None, reset: true });
+        let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: String::new(), done: false, text: None, reset: true, speech: None });
         let mut nudged = prompt.clone();
         if let Some(user) = nudged.iter_mut().rev().find(|m| m.role == "user") {
             user.content.push_str("\n\n[旁白：直接用她的口吻开口说话，不要分析、不要计划]");
         }
         output.clear();
+        envelope = SpeechEnvelopeStream::new(&settings.persona.name);
         result = {
             let generation = generate(&client, &settings, &nudged, &mut output, |delta| {
-                let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: delta.into(), done: false, text: None, reset: false });
+                let visible = envelope.push(delta);
+                if !visible.is_empty() {
+                    let _ = app.emit("chat-stream", StreamEvent {
+                        request_id: request_id.clone(), delta: visible, done: false, text: None,
+                        reset: false, speech: envelope.cue.clone(),
+                    });
+                }
             });
             tokio::select! {
                 biased;
@@ -755,6 +949,15 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
                 result = generation => Some(result),
             }
         };
+        if matches!(result, Some(Ok(()))) {
+            let tail = envelope.finish();
+            if !tail.is_empty() {
+                let _ = app.emit("chat-stream", StreamEvent {
+                    request_id: request_id.clone(), delta: tail, done: false, text: None,
+                    reset: false, speech: envelope.cue.clone(),
+                });
+            }
+        }
     }
     let (status, mut error) = match result {
         None => ("cancelled", None),
@@ -762,7 +965,7 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
         Some(Err(error)) => ("error", Some(error)),
     };
     let raw = output.clone();
-    let mut output = clean_reply(&output, &settings.persona.name);
+    let (mut output, speech) = clean_reply_with_speech(&output, &settings.persona.name);
     if status == "complete" && output.is_empty() {
         error = Some("模型这次没有进入角色，请再试一次或换个说法。".into());
     }
@@ -778,7 +981,7 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
             log::warn!("模型没回上使唤（{}），用判定的台词", error.as_deref().unwrap_or(""));
             let response = message(format!("{request_id}-assistant"), "assistant", fallback.clone(), "intent", "complete");
             with_store(&app, |store| store.insert(&response, None))?;
-            let _ = app.emit("chat-stream", StreamEvent { request_id, delta: String::new(), done: true, text: Some(response.content.clone()), reset: false });
+            let _ = app.emit("chat-stream", StreamEvent { request_id, delta: String::new(), done: true, text: Some(response.content.clone()), reset: false, speech: None });
             return Ok(response);
         }
     }
@@ -790,7 +993,9 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
     let response = message(format!("{request_id}-assistant"), "assistant", output, "model", status);
     with_store(&app, |store| store.insert(&response, Some(&prompt)))?;
     if let Some(error) = error { return Err(error); }
-    let _ = app.emit("chat-stream", StreamEvent { request_id, delta: String::new(), done: true, text: Some(response.content.clone()), reset: false });
+    let _ = app.emit("chat-stream", StreamEvent {
+        request_id, delta: String::new(), done: true, text: Some(response.content.clone()), reset: false, speech,
+    });
     Ok(response)
 }
 
@@ -1058,6 +1263,7 @@ mod tests {
         assert!(db.rate("failed", Some("up".into()), None).is_err());
         let samples = db.training_samples().unwrap();
         assert_eq!(samples.len(), 2);
+        assert!(samples.iter().all(|s| !s.to_string().contains("[[speech:")), "内部语音协议不能进入训练样本");
         assert!(samples[0]["messages"][0]["content"].as_str().unwrap().contains("[记忆上下文]"));
         assert_eq!(samples[1]["messages"][2]["content"], "萝莉斯：用户的正确回答");
         assert_eq!(samples[0]["messages"].as_array().unwrap().len(), 3);
@@ -1117,6 +1323,17 @@ mod tests {
     }
 
     #[test]
+    fn speech_tags_are_removed_from_answer_text_but_preserved_for_voice() {
+        let (clean, cue) = clean_reply_with_speech("你好呀！[[speech:happy|0.75|playful]]\n再见。[[speech:caring|0.4|warm]]", "萝莉斯");
+        assert_eq!(clean, "你好呀！\n再见。");
+        assert_eq!(cue.as_ref().map(|c| c.emotion), Some(crate::tts::SpeechEmotion::Happy));
+        let mut stream = SpeechEnvelopeStream::new("萝莉斯");
+        assert_eq!(stream.push("你好呀！[[speech:happy|0.75|playful]]"), "你好呀！");
+        assert_eq!(stream.cue.as_ref().map(|c| c.style), Some(crate::tts::SpeechStyle::Playful));
+        assert_eq!(stream.push("\n再见。[[speech:caring|0.4|warm]]"), "\n再见。")
+    }
+
+    #[test]
     fn repeated_questions_keep_only_the_latest_pair() {
         let mut history = Vec::new();
         for i in 0..5 {
@@ -1172,6 +1389,36 @@ mod tests {
         assert_eq!(clean_reply("（歪头）在呀。", "萝莉斯"), "（歪头）在呀。");
         assert_eq!(clean_reply("（歪头", "萝莉斯"), "（歪头");
         assert_eq!(clean_reply("  \n", "萝莉斯"), "");
+        let (spoken, cue) = clean_reply_with_speech(
+            "[[speech:happy|0.78|playful]]\n你回来啦！我等你好久了。",
+            "萝莉斯",
+        );
+        assert_eq!(spoken, "你回来啦！我等你好久了。");
+        assert_eq!(cue.unwrap().emotion, crate::tts::SpeechEmotion::Happy);
+        assert_eq!(clean_reply("[[speech:evil|0.5|warm]]\n至少正文还在。", "萝莉斯"), "至少正文还在。");
+        assert_eq!(clean_reply("[[speech:happy|0.7", "萝莉斯"), "", "半截协议不能漏进气泡");
+    }
+
+    #[test]
+    fn 流式语音标记不会进入气泡或首句_tts() {
+        let mut stream = SpeechEnvelopeStream::new("萝莉斯");
+        assert_eq!(stream.push("[[spe"), "");
+        assert_eq!(stream.push("ech:happy|0.75|playful]]\n你回来"), "你回来");
+        assert_eq!(stream.cue.as_ref().unwrap().energy, 0.75);
+        assert_eq!(stream.push("啦！"), "啦！");
+        assert_eq!(stream.finish(), "");
+
+        let mut old = SpeechEnvelopeStream::new("萝莉斯");
+        assert_eq!(old.push("在呀。"), "在呀。", "旧模型没有协议时立即回退");
+        assert!(old.cue.is_none());
+
+        let mut malformed = SpeechEnvelopeStream::new("萝莉斯");
+        assert_eq!(malformed.push("[[speech:happy|oops\n正文还在。"), "正文还在。");
+        assert!(malformed.cue.is_none());
+
+        let mut thinking = SpeechEnvelopeStream::new("萝莉斯");
+        assert_eq!(thinking.push("<think>不要显示"), "");
+        assert_eq!(thinking.push("</think>\n萝莉斯：[[speech:caring|0.4|warm]]\n休息一下嘛。"), "休息一下嘛。");
     }
 
     /// 打到本机 Ollama 上的真实链路：预填充 + 流式 + 收尾清理。需要默认模型已就绪：
@@ -1212,6 +1459,8 @@ mod tests {
         let sys = &prompt[0].content;
         assert!(sys.contains("# 此刻"), "{sys}");
         assert!(sys.contains("你正闲着"));
+        assert!(sys.contains("[[speech:emotion|energy|style]]"), "{sys}");
+        assert!(sys.contains("答不答应由你的身体决定"), "表演元数据不能绕过 request_action：{sys}");
         let last = &prompt.last().unwrap().content;
         assert!(last.starts_with("去玩吧"), "{last}");
         assert!(last.contains("[旁白：用户刚才让你去玩，你答应了]"), "{last}");

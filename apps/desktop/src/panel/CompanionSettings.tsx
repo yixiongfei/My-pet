@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../body/ipc'
 import { DEFAULT_CHAT_SETTINGS, errorText, invokeStrict } from '../chat/api'
@@ -14,9 +14,11 @@ const tabs: Array<{ id: Tab; label: string; icon: 'settings' | 'spark' | 'leaf' 
   { id: 'voice', label: '声音与台词', icon: 'chat' },
   { id: 'model', label: '模型与学习', icon: 'leaf' }, { id: 'gifts', label: '送份心意', icon: 'gift' },
 ]
+const isTab = (value: string | null): value is Tab => tabs.some(item => item.id === value)
+
 export function CompanionSettings() {
   const requested = new URLSearchParams(window.location.search).get('tab')
-  const [tab, setTab] = useState<Tab>(requested === 'gifts' ? 'gifts' : 'desktop')
+  const [tab, setTab] = useState<Tab>(isTab(requested) ? requested : 'desktop')
   const [desktop, setDesktop] = useState<DesktopSettings>({ size: 500, alwaysOnTop: true })
   const [settings, setSettings] = useState<ChatSettings>(DEFAULT_CHAT_SETTINGS)
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null)
@@ -63,17 +65,34 @@ export function CompanionSettings() {
   })
   const personaField = (field: keyof Persona, value: string) => setSettings(s => ({ ...s, persona: { ...s.persona, [field]: value } }))
   const gift = gifts.find(g => g.id === selectedGift)
+  const selectTab = (next: Tab) => {
+    setTab(next)
+    setNotice('')
+    setError('')
+  }
+  const navigateTabs = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next = index
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = tabs.length - 1
+    else return
+    event.preventDefault()
+    const item = tabs[next]
+    selectTab(item.id)
+    document.getElementById(`settings-tab-${item.id}`)?.focus()
+  }
   return <section className="settings-surface">
-    <nav className="settings-tabs" aria-label="设置类别">{tabs.map(item => <button key={item.id} className={tab === item.id ? 'active' : ''} aria-current={tab === item.id ? 'page' : undefined} onClick={() => { setTab(item.id); setNotice(''); setError('') }}><Icon name={item.icon} size={17} />{item.label}</button>)}</nav>
-    <div className="settings-content">
+    <div className="settings-tabs" role="tablist" aria-label="设置类别">{tabs.map((item, index) => <button type="button" role="tab" id={`settings-tab-${item.id}`} aria-controls={`settings-panel-${item.id}`} key={item.id} className={tab === item.id ? 'active' : ''} aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} onKeyDown={event => navigateTabs(event, index)} onClick={() => selectTab(item.id)}><Icon name={item.icon} size={17} />{item.label}</button>)}</div>
+    <div className="settings-content" role="tabpanel" id={`settings-panel-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
       {tab === 'desktop' && <>
         <NowHero />
-        <div className="section-kicker">YOUR LITTLE CORNER · 刚刚好的陪伴距离</div><p className="section-description">调到喜欢的大小，让她待在你觉得舒服的位置。</p>
+        <p className="companion-distance-label"><span aria-hidden="true" />刚刚好的陪伴距离<small>调整大小与置顶方式</small></p>
         <div className="desktop-preview"><div className="mini-desktop"><span /><span /><span /><div className="mini-document"><i /><i /><i /></div><img src="/avatar.png" alt="人物大小示意" style={{ width: 42 + desktop.size / 8 }} /></div><div><strong>{desktop.size} <small>px</small></strong><p>人物窗口大小</p></div></div>
         <label className="field-label" htmlFor="pet-size">显示大小<span>{Math.round(desktop.size / 5)}%</span></label>
-        <input id="pet-size" className="range-input" type="range" min="200" max="800" step="10" value={desktop.size} onChange={e => setDesktop(s => ({ ...s, size: Number(e.target.value) }))} />
+        <input id="pet-size" className="range-input" type="range" min="200" max="800" step="10" value={desktop.size} aria-valuetext={`${desktop.size} 像素`} onChange={e => setDesktop(s => ({ ...s, size: Number(e.target.value) }))} />
         <div className="range-captions"><span>小巧 · 200 px</span><span>放大 · 800 px</span></div>
-        <div className="size-presets">{[[300, '小巧'], [500, '标准'], [650, '放大']].map(([size, label]) => <button key={size} className={desktop.size === size ? 'selected' : ''} onClick={() => setDesktop(s => ({ ...s, size: Number(size) }))}>{label}</button>)}</div>
+        <div className="size-presets" role="group" aria-label="常用人物大小">{[[300, '小巧'], [500, '标准'], [650, '放大']].map(([size, label]) => <button type="button" key={size} className={desktop.size === size ? 'selected' : ''} aria-pressed={desktop.size === size} onClick={() => setDesktop(s => ({ ...s, size: Number(size) }))}>{label}</button>)}</div>
         <label className="toggle-row"><span><strong>始终在最上层</strong><small>开启后，她会显示在其他窗口上方。</small></span><input type="checkbox" role="switch" checked={desktop.alwaysOnTop} onChange={e => setDesktop(s => ({ ...s, alwaysOnTop: e.target.checked }))} /><span className="switch-track" /></label>
         <div className="setting-tips"><Icon name="chat" size={17} /><p>单击人物打开对话，按住并移动即可拖拽。<br />在人物上右键打开这个设置页；托盘图标右键有快捷菜单。</p></div>
         <button className="primary-button" disabled={busy} onClick={() => void action(async () => { setDesktop(await invokeStrict<DesktopSettings>('set_desktop_settings', { settings: desktop })); return '显示设置已应用，下次启动也会保留。' })}>{busy ? '应用中…' : '应用显示设置'}<Icon name="check" size={16} /></button>
@@ -110,8 +129,8 @@ export function CompanionSettings() {
           <button className="primary-button" disabled={busy || !selectedGift} onClick={() => void action(async () => { const name = await invokeStrict<string>('give_gift', { id: selectedGift }); return `送出了「${name}」，看看她的反应吧。` })}>{busy ? '正在送出…' : `送出${gift ? `「${gift.name}」` : '礼物'}`}<Icon name="gift" size={17} /></button>
         </> : <div className="empty-state"><p>{!IS_TAURI ? '打开桌宠应用后，这里会显示可赠送的礼物。' : '礼物列表还没准备好，请检查食物 JSON 和人物资源。'}</p><button className="secondary-button" disabled={busy} onClick={() => void action(async () => { const items = await invokeStrict<Gift[]>('list_gifts'); setGifts(items); setSelectedGift(items[0]?.id ?? ''); return items.length ? '礼物列表已刷新。' : '还没有可赠送的礼物，请检查人物资源。' })}>刷新礼物</button></div>}
       </>}
-      {notice && <div className="notice notice-success" role="status"><Icon name="check" size={16} /><span>{notice}</span></div>}
-      {error && <div className="notice notice-error" role="alert"><span>{error}</span></div>}
+      {notice && <div className="notice notice-success" role="status"><Icon name="check" size={16} /><span>{notice}</span><button type="button" onClick={() => setNotice('')} aria-label="关闭提示">×</button></div>}
+      {error && <div className="notice notice-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError('')} aria-label="关闭错误提示">×</button></div>}
     </div>
   </section>
 }

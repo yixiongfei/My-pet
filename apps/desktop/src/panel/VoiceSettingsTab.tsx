@@ -11,7 +11,7 @@ const SPEAKERS: Array<[string, string]> = [
   ['eric', '带点沙哑的成都男声'], ['ryan', '有节奏感的英文男声'], ['aiden', '阳光的美式男声'],
 ]
 const MODE_LABEL: Record<LineMode, string> = { fixed: '固定台词', model: '模型即兴', off: '不说话' }
-const SAMPLE_LINE = '你好呀，我是{name}。今天也一起加油吧！Hello, nice to see you.'
+const SAMPLE_LINE = '诶？你来啦。我是{name}——等你好一会儿了。'
 
 interface Props {
   settings: ChatSettings
@@ -93,7 +93,7 @@ export function VoiceSettingsTab({ settings, setSettings, busy, action, persist 
 
   return <>
     <div className="section-kicker">HER VOICE</div><h2>让她开口说话</h2>
-    <p className="section-description">语音由本机的 Qwen3-TTS 合成（中英文都行），不联网。声音和语气在这里挑；桌面上的短句和对话回复都可以念出来。</p>
+    <p className="section-description">语音由本机的 Qwen3-TTS 合成，不联网。每句话会结合情绪、精力、当前行为和好感度来表演；生病或困倦时，身体状态会优先。</p>
 
     <div className={`connection-card ${tts?.connected ? 'connected' : ''}`}>
       <span className={`status-dot ${tts?.connected ? 'is-online' : ''}`} />
@@ -122,7 +122,7 @@ export function VoiceSettingsTab({ settings, setSettings, busy, action, persist 
       <button className={voice.style === NEURO_STYLE && !voice.moodStyle ? 'selected' : ''} onClick={() => setVoice({ voice: 'vivian', style: NEURO_STYLE, moodStyle: false, speed: 1.12, keepPitch: false })}>Neuro 风：平稳偏快偏高</button>
       <button className={voice.style === '' && voice.moodStyle ? 'selected' : ''} onClick={() => setVoice({ voice: 'serena', style: '', moodStyle: true, speed: 1, keepPitch: false })}>自然：温柔随心情</button>
     </div>
-    <label className="toggle-row"><span><strong>语气跟着心情走</strong><small>开心时轻快一点，累了、状态差的时候有气无力。要平稳的电子音就关掉。</small></span><input type="checkbox" role="switch" checked={voice.moodStyle} onChange={e => setVoice({ moodStyle: e.target.checked })} /><span className="switch-track" /></label>
+    <label className="toggle-row"><span><strong>加强心情变化</strong><small>开启后，开心时会额外轻快一点。困倦、睡觉和生病不受这个开关影响，始终会压低表演强度。</small></span><input type="checkbox" role="switch" checked={voice.moodStyle} onChange={e => setVoice({ moodStyle: e.target.checked })} /><span className="switch-track" /></label>
     <label className="field-label" htmlFor="voice-speed">语速<span>{voice.speed.toFixed(2)}×</span></label>
     <input id="voice-speed" className="range-input" type="range" min="0.7" max="1.6" step="0.02" value={voice.speed} onChange={e => setVoice({ speed: Number(e.target.value) })} />
     <div className="range-captions"><span>慢一点（音调也低一点）</span><span>快一点（音调也高一点）</span></div>

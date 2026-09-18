@@ -4,7 +4,7 @@ import type { Activity, GraphType } from '@vpet/shared'
  * 行为树的「当前计划」一层：每个 Core 活动下有一池表现动画，各自带最短 / 最长驻留时间。
  *
  *   Work  → 写文案 8–15 min · 清屏 5–10 · 直播 10–20 · 烧烤 6–12 · 修屏幕 6–12
- *   Study → 看书 · 写字 · 研究 · 画画
+ *   Study → 看书 · 阅读 · 写字 · 研究 · 画画
  *   Play  → 打游戏 · 删错误 · 跳绳 · 玩水 · 打网球 · 两套舞蹈
  *
  * Core 的活动（Work/Study/…）、时长和数值一概不变；这里只管画面：驻留期没到不因为
@@ -31,6 +31,7 @@ export const ANIMATION_POOLS: Partial<Record<Activity, PoolEntry[]>> = {
   ],
   studying: [
     work('study', 8, 15),          // 看书
+    work('reading', 8, 15),        // 阅读（WORK/reading，只有 nomal 时由 mood fallback 复用）
     work('calligraphy', 6, 12),    // 写字
     work('studytwo', 6, 12),       // 研究 / 思考
     work('studypaint', 8, 15),     // 画画

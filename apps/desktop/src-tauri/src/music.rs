@@ -37,12 +37,13 @@ pub fn playing(now_ms: i64) -> bool {
 const SILENT_PEAK: f32 = 0.004;
 /// 标题说在播、但连着这么久没声，就当没在放（静音 / 假窗口）
 pub const SILENT_GRACE_SEC: u32 = 20;
-/// 高潮：短时电平 ≥ 长时均值的这么多倍，且绝对值够响；退出用更低的门槛，免得一句里抖来抖去
-const CLIMAX_RATIO_ON: f32 = 1.35;
-const CLIMAX_RATIO_OFF: f32 = 1.1;
-const CLIMAX_MIN_PEAK: f32 = 0.35;
+/// 高潮：短时电平 ≥ 长时均值的这么多倍，且绝对值够响；退出用更低的门槛，免得一句里抖来抖去。
+/// Spotify 开了响度标准化时，实机峰值往往只有 0.2–0.3；0.35 会让明显的副歌也进不来。
+const CLIMAX_RATIO_ON: f32 = 1.25;
+const CLIMAX_RATIO_OFF: f32 = 1.08;
+const CLIMAX_MIN_PEAK: f32 = 0.25;
 /// 长时均值至少这么大才谈得上高潮（刚开始放、还在淡入时不算）
-const CLIMAX_MIN_BASE: f32 = 0.06;
+const CLIMAX_MIN_BASE: f32 = 0.04;
 /// 短时 / 长时 EMA 的系数（每秒采一次：快的约 2 秒，慢的约 45 秒）
 const EMA_FAST: f32 = 0.5;
 const EMA_SLOW: f32 = 0.022;
@@ -72,12 +73,7 @@ impl Meter {
         } else {
             self.silent_for_sec = 0;
         }
-        let ratio = if self.slow > 0.0 { self.fast / self.slow } else { 0.0 };
-        self.climax = if self.climax {
-            self.fast >= CLIMAX_MIN_PEAK * 0.8 && ratio >= CLIMAX_RATIO_OFF
-        } else {
-            self.slow >= CLIMAX_MIN_BASE && self.fast >= CLIMAX_MIN_PEAK && ratio >= CLIMAX_RATIO_ON
-        };
+        self.climax = climax_at(self.climax, self.fast, self.slow);
     }
 
     /// 标题说在播，但声音这边不同意
@@ -87,6 +83,17 @@ impl Meter {
 
     pub fn reset(&mut self) {
         *self = Meter::default();
+    }
+}
+
+/// 只看已经平滑好的快 / 慢电平决定是否在高潮。拆成纯函数，
+/// 边界值和迟滞可以直接测，不用反推 EMA 要喂多少秒。
+fn climax_at(was_climax: bool, fast: f32, slow: f32) -> bool {
+    let ratio = if slow > 0.0 { fast / slow } else { 0.0 };
+    if was_climax {
+        fast >= CLIMAX_MIN_PEAK * 0.8 && ratio >= CLIMAX_RATIO_OFF
+    } else {
+        slow >= CLIMAX_MIN_BASE && fast >= CLIMAX_MIN_PEAK && ratio >= CLIMAX_RATIO_ON
     }
 }
 
@@ -237,7 +244,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn 电平表_没声就当没放_响起来算高潮() {
+    fn 电平表_没声就当没放_正常副歌抬升也能触发() {
         let mut m = Meter::default();
         for _ in 0..SILENT_GRACE_SEC {
             m.sample(0.0);
@@ -252,13 +259,22 @@ mod tests {
         }
         assert!(!m.climax);
         for _ in 0..4 {
-            m.sample(0.6); // 副歌炸开
+            m.sample(0.30); // 响度标准化后不会很炸，但副歌仍有清楚抬升
         }
         assert!(m.climax, "fast {} slow {}", m.fast, m.slow);
         for _ in 0..30 {
             m.sample(0.12); // 回落
         }
         assert!(!m.climax);
+    }
+
+    #[test]
+    fn 高潮门槛有迟滞_进入后不在一句里抖动() {
+        assert!(!climax_at(false, 0.24, 0.18), "绝对电平不够不该误触发");
+        assert!(!climax_at(false, 0.25, 0.21), "只是整体很响，没有明显抬升");
+        assert!(climax_at(false, 0.28, 0.21), "中等音量下的清楚抬升应该进高潮");
+        assert!(climax_at(true, 0.24, 0.22), "还在退出线上方，不该抖回主歌");
+        assert!(!climax_at(true, 0.23, 0.22), "回落到退出线下才离开高潮");
     }
 
     #[test]

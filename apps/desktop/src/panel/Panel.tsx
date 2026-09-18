@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { PetState, Verdict } from '@vpet/shared'
 import { invokeCore } from '../body/ipc'
-import { subscribePetState } from '../body/petState'
+import { fetchPetState, subscribePetState } from '../body/petState'
 import { Gauge, GREEN, RED, YELLOW } from './Gauge'
 
 /** 面板刷新节奏。Core 只在换动作时推事件，数值得自己拉 */
@@ -165,21 +165,76 @@ function remaining(dueAt: number): string {
  */
 export function NowHero() {
   const [state, setState] = useState<PetState | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
   useEffect(() => {
-    void invokeCore<PetState>('get_pet_state').then((s) => s && setState(s))
-    return subscribePetState(setState)
+    let live = true
+    let pulling = false
+    const pull = async () => {
+      if (pulling) return
+      pulling = true
+      const next = await fetchPetState()
+      pulling = false
+      if (!live) return
+      if (next) {
+        setState(next)
+        setUnavailable(false)
+      } else {
+        setUnavailable(true)
+      }
+    }
+    void pull()
+    const timer = window.setInterval(() => void pull(), REFRESH_MS)
+    const stop = subscribePetState((next) => {
+      if (!live) return
+      setState(next)
+      setUnavailable(false)
+    })
+    return () => {
+      live = false
+      window.clearInterval(timer)
+      stop()
+    }
   }, [])
-  if (!state) return <><div className="section-kicker">此刻</div><h2>正在读取状态…</h2></>
+  if (!state) return (
+    <section className="now-hero now-hero-loading" aria-labelledby="now-heading" aria-busy={!unavailable}>
+      <p className="now-hero-kicker">此刻</p>
+      <h2 id="now-heading">{unavailable ? '暂时读不到她的状态' : '正在读取状态…'}</h2>
+      <p className="now-hero-hint">{unavailable ? '会在这里自动重试，不用刷新页面。' : '等她回应一下。'}</p>
+    </section>
+  )
   const what = state.action?.name ?? '闲着'
   const why = state.action?.reason ? `因为${state.action.reason}` : ''
-  const food = state.action?.food ? ` · ${state.action.food.name}` : ''
-  return <>
-    <div className="section-kicker">此刻 · {ACTIVITY_LABEL[state.activity] ?? state.activity} · {MOOD_LABEL[state.mood] ?? state.mood}</div>
-    <h2>{what}<span style={{ fontSize: 15, color: '#748b68', marginLeft: 12, fontFamily: 'system-ui, "Microsoft YaHei", sans-serif' }}>{why}{food}</span></h2>
-    <p className="section-description" style={{ marginBottom: 18 }}>
-      体力 {state.strength.toFixed(0)} · 心情 {state.feeling.toFixed(0)} · 饱腹 {state.hunger.toFixed(0)} · 口渴 {state.thirst.toFixed(0)} · 健康 {state.health.toFixed(0)} · 好感 {state.affection.toFixed(0)}
-    </p>
-  </>
+  const food = state.action?.food?.name
+  const metrics = [
+    ['体力', state.strength],
+    ['心情', state.feeling],
+    ['饱腹', state.hunger],
+    ['口渴', state.thirst],
+    ['健康', state.health],
+    ['好感', state.affection],
+  ] as const
+  return (
+    <section className="now-hero" aria-labelledby="now-heading">
+      <div className="now-hero-summary" role="status" aria-live="polite" aria-atomic="true">
+        <p className="now-hero-kicker">
+          此刻 <span aria-hidden="true">·</span> {ACTIVITY_LABEL[state.activity] ?? state.activity}{' '}
+          <span aria-hidden="true">·</span> {MOOD_LABEL[state.mood] ?? state.mood}
+        </p>
+        <div className="now-hero-action">
+          <h2 id="now-heading">{what}</h2>
+          {(why || food) && <p>{why}{food && <span> · {food}</span>}</p>}
+        </div>
+      </div>
+      <dl className="now-hero-metrics" aria-label="身体状态">
+        {metrics.map(([label, value]) => (
+          <div key={label} className={label === '健康' && value < SICK ? 'is-warning' : undefined}>
+            <dt>{label}</dt>
+            <dd>{value.toFixed(0)}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
 }
 
 export function Panel() {

@@ -176,6 +176,8 @@ pub fn say(app: &AppHandle, tag: &str, text: &str) -> bool {
 
 /// 模型改写一句提醒最多等这么久；超时就说原句。「该开始了」是有时效的，不能等模型慢悠悠加载
 const IN_CHARACTER_TIMEOUT: Duration = Duration::from_secs(25);
+/// 给 TTS 的台词先得像人会说的话：短句和自然停顿比书面上的完整漂亮更重要。
+const SPOKEN_LANGUAGE_RULE: &str = "句子要能直接说出口：短、口语、停顿自然；不要写成通知、总结或客服建议，语气词只在自然时偶尔用。";
 
 /// 把一句「事实」交给模型，用她的口吻说出来（日程提醒用）。事实里的时间、数字不能变——
 /// 改写完会核对原句里每个 `HH:MM` 都还在，不在就退回原句。模型不在 / 超时 / 写砸了也退回原句。
@@ -227,8 +229,8 @@ pub fn mumble(app: &AppHandle, avoid: Vec<String>, volume: f32, done: impl FnOnc
             "你是{}。性格：{}。说话方式：{}。\n现在 {}，{}{}\n\
              自言自语一句（不超过 20 个字）：说说你此刻在做的事、感觉或一个小念头。\
              这句话不是对用户说的——不要用「你」、不要提问、不要提醒、不要打招呼。\
-             只输出这一句话本身：不要引号、不要解释、不要动作描写。",
-            p.name, p.personality, p.speaking_style, hour, situation, avoid_text
+             {}只输出这一句话本身：不要引号、不要解释、不要动作描写。",
+            p.name, p.personality, p.speaking_style, hour, situation, avoid_text, SPOKEN_LANGUAGE_RULE
         );
         let raw = match tokio::time::timeout(IN_CHARACTER_TIMEOUT, chat::complete(&settings, &system, "嘀咕一句。", 40, 0.95)).await {
             Ok(Ok(r)) => r,
@@ -259,8 +261,8 @@ async fn rephrase(settings: &ChatSettings, facts: &str, mood: Mood) -> Result<St
         "你是{}。性格：{}。说话方式：{}。你现在{}。\n\
          你要顺口提醒用户下面这件事（这是事实，时间和数字一个都不能改，也不能添加没有的安排）：\n{}\n\
          用一到两句话、不超过 40 个字，像熟悉的朋友随口提一句，可以带一点你的语气。\
-         不要列清单、不要反问、不要解释。只输出这句话本身：不要引号、不要动作描写。",
-        p.name, p.personality, p.speaking_style, mood, facts
+         {}不要列清单、不要反问、不要解释。只输出这句话本身：不要引号、不要动作描写。",
+        p.name, p.personality, p.speaking_style, mood, facts, SPOKEN_LANGUAGE_RULE
     );
     let raw = chat::complete(settings, &system, "开口吧。", 80, 0.8).await?;
     let text = tidy(&raw, &p.name);
@@ -408,8 +410,8 @@ async fn improvise(settings: &ChatSettings, a: &ActionRef, mood: Mood) -> Result
     let system = format!(
         "你是{}。性格：{}。说话方式：{}。\n你现在{}，刚开始「{}」，原因是：{}。\n\
          用一句话（不超过 25 个字）说出你此刻脱口而出的话，像自言自语或对身边的人随口一说。\
-         只输出这一句话本身：不要引号、不要解释、不要动作描写。",
-        p.name, p.personality, p.speaking_style, mood_word(mood), what, a.reason
+         {}只输出这一句话本身：不要引号、不要解释、不要动作描写。",
+        p.name, p.personality, p.speaking_style, mood_word(mood), what, a.reason, SPOKEN_LANGUAGE_RULE
     );
     let raw = chat::complete(settings, &system, "开口吧。", 48, 0.9).await?;
     let text = tidy(&raw, &p.name);
@@ -431,8 +433,8 @@ pub async fn draft_lines(settings: &ChatSettings, cat: &Catalog, id: &str, n: us
     };
     let system = format!(
         "你是{}。性格：{}。说话方式：{}。\n请写 {} 句她开始「{}」时可能随口说的话，每句不超过 25 个字，\
-         彼此语气不同。{}每行一句，不要编号、不要引号、不要解释。",
-        p.name, p.personality, p.speaking_style, n, a.name, hint
+         彼此语气不同。{}{}每行一句，不要编号、不要引号、不要解释。",
+        p.name, p.personality, p.speaking_style, n, a.name, hint, SPOKEN_LANGUAGE_RULE
     );
     let raw = chat::complete(settings, &system, "开始写。", 64 * n as u32, 0.95).await?;
     let lines: Vec<String> = raw
