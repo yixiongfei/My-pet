@@ -6,8 +6,8 @@
 //! - **放歌**：打开 `spotify:` 协议（商店版 / 桌面版都认），等它起来后如果还没在播，
 //!   按一下键盘的「播放 / 暂停」媒体键。Spotify 会接着上次的列表放。
 //!
-//! 状态机只收到一个布尔（`Event::Music`），由 lib.rs 每分钟看一次；「放歌」意图先乐观地
-//! 置真，两分钟内以检测为准。
+//! 状态机只收到一个布尔（`Event::Music`），lib.rs 每十秒看一次；「放歌」意图先乐观地
+//! 置真，看见它真在播就交给检测——你一按暂停她十秒内就停。
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -18,12 +18,17 @@ const OPTIMISTIC_MS: i64 = 120_000;
 
 static FORCED_UNTIL: AtomicI64 = AtomicI64::new(0);
 
-/// 现在有没有歌在放。乐观期内一律算在放
+/// 现在有没有歌在放。「放歌」之后的乐观期只用来撑过 Spotify 冷启动：
+/// 一旦看见它真的在播，乐观期就结束，之后完全以窗口标题为准——你一按暂停她就该停
 pub fn playing(now_ms: i64) -> bool {
+    let state = spotify_state();
     if now_ms < FORCED_UNTIL.load(Ordering::Relaxed) {
+        if state == Some(SpotifyState::Playing) {
+            FORCED_UNTIL.store(0, Ordering::Relaxed);
+        }
         return true;
     }
-    spotify_state().map_or(false, |s| s == SpotifyState::Playing)
+    state == Some(SpotifyState::Playing)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

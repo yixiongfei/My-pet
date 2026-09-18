@@ -344,6 +344,7 @@ fn spawn_pet_clock(app: AppHandle) {
             }
             fire_due_timers(&app);
             advance_pomodoro(&app, TICK.as_secs_f32());
+            poll_music(&app);
             check_nudges(&app, &next.state);
 
             if last_persist.elapsed() >= PERSIST_EVERY {
@@ -451,6 +452,8 @@ fn cancel_focus(app: AppHandle) -> bool {
 
 /// 多久看一次。粒度是分钟，没必要每拍都去开知识库
 const NUDGE_EVERY: Duration = Duration::from_secs(60);
+/// 多久看一次 Spotify 在不在播：枚举一遍窗口很便宜，歌一停十秒内她就得停下
+const MUSIC_EVERY: Duration = Duration::from_secs(10);
 /// 静音时段（钟点）：和作息、台词一致——夜里她睡了，你也该睡了
 const NUDGE_QUIET_FROM: f32 = 23.0;
 const NUDGE_QUIET_UNTIL: f32 = 8.0;
@@ -474,6 +477,24 @@ struct NudgeState {
     her_recent: std::collections::VecDeque<(i64, Activity, String)>,
     /// 上一次看到的「在不在放歌」，变了才发事件
     music: Option<bool>,
+    last_music_check: Option<Instant>,
+}
+
+/// 你在不在放歌：每十秒看一次，变了才告诉状态机（她会去跳 / 停下）
+fn poll_music(app: &AppHandle) {
+    let Some(ns) = app.try_state::<Mutex<NudgeState>>() else { return };
+    let Ok(mut n) = ns.lock() else { return };
+    if n.last_music_check.is_some_and(|t| t.elapsed() < MUSIC_EVERY) {
+        return;
+    }
+    n.last_music_check = Some(Instant::now());
+    let playing = music::playing(now_ms());
+    if n.music.unwrap_or(false) != playing {
+        n.music = Some(playing);
+        log::info!("音乐{}", if playing { "开始了" } else { "停了" });
+        drop(n);
+        apply(app, &Event::Music(playing));
+    }
 }
 
 /// 你多久没动键鼠了（秒）。读不到就当「不知道」——调用方按不在处理
@@ -648,16 +669,6 @@ fn check_nudges(app: &AppHandle, state: &PetState) {
     let idle_max = settings.nudges.idle_max_sec;
     let idle = idle_seconds();
     observe_presence(&mut n, idle.unwrap_or(u32::MAX / 2), idle_max);
-    // 你在不在放歌：变了才告诉状态机（她会去跳 / 停下）
-    let playing = music::playing(now_ms());
-    if n.music.unwrap_or(false) != playing {
-        n.music = Some(playing);
-        log::info!("音乐{}", if playing { "开始了" } else { "停了" });
-        drop(n);
-        apply(app, &Event::Music(playing));
-        let Ok(again) = ns.lock() else { return };
-        n = again;
-    }
 
     if !settings.nudges.enabled || !settings.lines.enabled {
         return;

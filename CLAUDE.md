@@ -9,13 +9,14 @@
 - 进度变化 → `docs/06-roadmap.md` 对应行的 ✅ / 🚧 / ⬜。
 - 模块 / 事件 / 目录变了 → `docs/02-components.md`。
 - 数值 / 阈值 / 决策 / 健康 → `docs/03-core.md`。
-- 布局 / 动画 / 气泡 / 交互 → `docs/04-body-animation.md`。
+- 布局 / 动画 / 气泡 / 交互 → `docs/04-body-animation.md`；接了 / 拆了哪组动画 → `docs/07-animations.md`。
 - 对话 / 意图 / 记忆 / 语音 / 台词 → `docs/05-brain.md`。
 - 用户能感知的行为变了 → `README.md`「和她相处」。
 
 ## 工作流
 
 - 提交前：`pnpm check`（cargo test + typecheck）。
+- 改完先给用户看效果：`pnpm dev`（Vite + debug exe，前端热更新）；**不要每改一次就 `pnpm release`**——那是十分钟的 LTO 链接，只在用户说「这版稳定了」时才发。
 - 发布到桌面：`pnpm release`（停桌宠 → 编 release exe → `start-vpet.ps1` 拉起 Ollama、tts-server、桌宠）。正在跑的 release exe 会占住链接器，脚本会先停它。
 - 发正式版到 GitHub：`pnpm release:github -- -Version X.Y.Z`（要求工作区干净、gh 已登录；会改版本号、切 CHANGELOG、打 tag、建 Release）。本机只留正式版：`pnpm clean`。
 - 只有一个远程 `origin`（github.com/yixiongfei/My-pet）；正式版 exe 只在 `apps/desktop/src-tauri/target/release/`，别复制到桌面。

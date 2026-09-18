@@ -1,7 +1,7 @@
 import { Verdict } from '@vpet/shared'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimationPlayer } from './AnimationPlayer'
-import { Bubble } from './Bubble'
+import { Bubble, themeNow, type BubbleTheme } from './Bubble'
 import { Countdown } from './Countdown'
 import { subscribe } from './events'
 import { HitMask } from './hitMask'
@@ -62,6 +62,12 @@ export function PetCanvas() {
   const [name, setName] = useState('VPet')
   const [bubble, setBubble] = useState<string | null>(null)
   const [bubbleTone, setBubbleTone] = useState<'talk' | 'self'>('talk')
+  /** 白天白气泡、黑夜黑气泡；每分钟看一次钟 */
+  const [theme, setTheme] = useState<BubbleTheme>(() => themeNow())
+  useEffect(() => {
+    const t = window.setInterval(() => setTheme(themeNow()), 60_000)
+    return () => window.clearInterval(t)
+  }, [])
   const [streaming, setStreaming] = useState(false)
   /** 正在流式收的那条回复：文本 + 已经送去念到哪了 */
   const streamRef = useRef<{ id: string; text: string; spoken: number } | null>(null)
@@ -317,7 +323,7 @@ export function PetCanvas() {
         )}
         {bubble && (
           <div style={{ position: 'absolute', left: 6, right: 6, bottom: 2 }}>
-            <Bubble name={name} text={bubble} streaming={streaming} tone={bubbleTone} maxHeight={window.innerWidth * HEAD_ROOM - 6} />
+            <Bubble name={name} text={bubble} streaming={streaming} tone={bubbleTone} theme={theme} maxHeight={window.innerWidth * HEAD_ROOM - 6} />
           </div>
         )}
       </div>
