@@ -46,6 +46,19 @@ export const ANIMATION_POOLS: Partial<Record<Activity, PoolEntry[]>> = {
   ],
 }
 
+/**
+ * 按 Core 指名的动画（`action.graph`）单独开的池，优先于按活动的池：
+ * 「跟着歌跳舞」是 playing，但只该在舞蹈动画里轮换，不该跳着跳着去打游戏
+ */
+export const ACTION_POOLS: Record<string, PoolEntry[]> = {
+  music: [
+    common('music', 3, 6),         // 跳舞 1（Music）
+    common('music2', 2, 4),        // 跳舞 2（Music2）
+    common('cosplay', 2, 4),       // 换装（saraburate）
+    common('ohhhh', 1, 3),         // 嗨起来（saraburate）
+  ],
+}
+
 /** 抽一个驻留时长（毫秒） */
 export const dwellMs = (e: PoolEntry): number => (e.minMin + Math.random() * (e.maxMin - e.minMin)) * 60_000
 

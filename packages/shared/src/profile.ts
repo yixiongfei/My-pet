@@ -75,6 +75,8 @@ const PetJson = z.object({
   pet: z.object({ petname: z.string().optional() }),
   touchhead: Rect,
   touchbody: Rect,
+  /** 捏脸区域（原版 pinch）；老 pet.json 没有就不能捏 */
+  pinch: Rect.optional(),
   /** lps 把按心情分的字段平铺成 happy_px / nomal_px / …，见 byMood */
   touchraised: z.record(z.string(), z.number()),
   raisepoint: z.record(z.string(), z.number()),
@@ -89,6 +91,8 @@ export interface PetProfile {
   touchHead: Rect
   /** 短按摸身体的命中区域 */
   touchBody: Rect
+  /** 按住脸拖动 = 捏脸（common/pinch）；没有就不能捏 */
+  pinch: Rect | null
   /** 长按提起的命中区域；ill 时宠物瘫着，区域整体下移 */
   touchRaised: Record<Mood, Rect>
   /** 提起时贴合光标的锚点（宠物被拎住的那个点） */
@@ -105,6 +109,7 @@ export function parsePetProfile(json: unknown): PetProfile {
     name: raw.pet.petname ?? 'vup',
     touchHead: raw.touchhead,
     touchBody: raw.touchbody,
+    pinch: raw.pinch ?? null,
     touchRaised: byMood(raw.touchraised, 'touchraised', (v) => ({ px: v('px'), py: v('py'), sw: v('sw'), sh: v('sh') })),
     raisePoint: byMood(raw.raisepoint, 'raisepoint', (v) => ({ x: v('x'), y: v('y') })),
     moves: raw.move.map((m) => ({

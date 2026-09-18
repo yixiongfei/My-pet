@@ -774,6 +774,7 @@ mod tests {
                 b
             },
             directive: Some(super::super::state_machine::Directive { target: "play".into(), left: 12.5 }),
+            music: true,
         };
         db.record_pet_state(&p).unwrap();
         let back = db.latest_pet_state().unwrap().unwrap();

@@ -1,6 +1,6 @@
 import type { GraphType, Manifest, PetProfile, PetState } from '@vpet/shared'
 import type { AnimationPlayer } from './AnimationPlayer'
-import { ANIMATION_POOLS, dwellMs, pickEntry, type PoolEntry } from './animationPool'
+import { ACTION_POOLS, ANIMATION_POOLS, dwellMs, pickEntry, type PoolEntry } from './animationPool'
 import { namesFor, pick, resolveClips, resolveLayered } from './manifest'
 import { CLIP_FOR, DEFAULT_PET_STATE } from './petState'
 import {
@@ -13,7 +13,7 @@ import {
   stopPetMotion,
   type PetMotionEvent,
 } from './petWindow'
-import { clickZone, type ClickZone } from './touch'
+import { clickZone, inPinchZone, type ClickZone } from './touch'
 
 /** 按住多久算长按（原版 Setting.PressLength，默认 0.5s） */
 const PRESS_MS = 500
@@ -26,11 +26,22 @@ const MOVE_CHANCE = 0.4
 const STATE_IDLE_CHANCE = 0.35
 /** 提起后先挣扎几次再转静止（原版 rasetype 0→2，共 3 次 Raised_Dynamic） */
 const STRUGGLE_TIMES = 3
+/** 空闲小动作里插「日常」（Relax 的 MI / MU、BDay）的概率 */
+const RELAX_CHANCE = 0.3
+const RELAX_NAMES = ['mi', 'mu', 'bday']
+/** 全身状态都很好时，空闲小动作有这个概率变成飞吻（WORK/kiss） */
+const KISS_CHANCE = 0.2
+/** 「全面状态都很高」的门槛 */
+const KISS_MIN = { strength: 80, feeling: 80, hunger: 70, thirst: 70, health: 80, affection: 60 }
+/** 吃饭时有这个概率是在吃麦当劳（Eat/EatMcDonald，不用夹心） */
+const MCDONALD_CHANCE = 0.2
+/** 说话动画：各种话配哪套 say。self 自言自语 · serious 正经提醒 · shining 开心 · shy 害羞 */
+export type SayStyle = 'self' | 'serious' | 'shining' | 'shy'
 const MOOD_RANK: Record<PetState['mood'], number> = { ill: 0, poorcondition: 1, nomal: 2, happy: 3 }
 
 type InteractionMode =
   | 'idle' | 'touching' | 'raised' | 'talking' | 'moving' | 'move-exit' | 'side' | 'side-exit'
-  | 'startup' | 'shutdown' | 'thinking' | 'transition' | 'idle-state-one' | 'idle-state-two'
+  | 'startup' | 'shutdown' | 'thinking' | 'transition' | 'idle-state-one' | 'idle-state-two' | 'pinching'
 
 export interface InteractionOpts {
   player: AnimationPlayer
@@ -68,6 +79,12 @@ export class Interaction {
   private disposed = false
   /** 正在出声（语音在放）。一次性动画播完后 toActivity 会先接上 say 动画 */
   private speaking = false
+  /** 这句话配哪套 say；没指定按心情挑 */
+  private sayStyle: SayStyle | undefined
+  /** 按下的位置在脸上：拖起来是捏脸不是提起 */
+  private pressOnFace = false
+  /** 这一顿饭是不是在吃麦当劳（进入吃饭时掷一次，整顿饭不变） */
+  private mcdonald = false
   /** 动画池里当前这一段：属于哪个活动、播到什么时候换。摸头 / 说话打断后回来接着播它 */
   private pooled: { activity: PetState['activity']; entry: PoolEntry; until: number } | null = null
   private poolTimer = 0
@@ -105,6 +122,10 @@ export class Interaction {
       s.mood !== before.mood ||
       s.action?.id !== before.action?.id ||
       s.action?.food?.id !== before.action?.food?.id
+    // 刚开始吃一顿饭：掷一次是不是麦当劳，整顿饭不变
+    if (s.activity === 'eating' && (before.activity !== 'eating' || s.action?.id !== before.action?.id)) {
+      this.mcdonald = s.action?.id !== 'medicine' && Math.random() < MCDONALD_CHANCE && this.hasClip('common', 'eatmcdonald')
+    }
     this.state = s
     if (this.mode === 'shutdown') return
     if (changed && (this.mode === 'moving' || this.mode === 'move-exit')) {
@@ -141,8 +162,18 @@ export class Interaction {
    * 说话期间循环播 say 动画。正在摸 / 拆礼物这种一次性动画不打断——
    * 播完之后 toActivity 看到 speaking 还挂着，会接上 say。提起时不说话（嘴被拎着呢）
    */
-  startSay(): void {
+  startSay(style?: string): void {
     if (this.disposed) return
+    const next = (['self', 'serious', 'shining', 'shy'] as const).find((s) => s === style)
+    // 已经在说了、只是换了一句：风格变了就换 say 动画，没变就接着播
+    if (this.speaking && this.mode === 'talking') {
+      if (next && next !== this.sayStyle) {
+        this.sayStyle = next
+        this.playSay()
+      }
+      return
+    }
+    this.sayStyle = next
     this.speaking = true
     if (this.mode === 'moving' || this.mode === 'move-exit') {
       this.cancelMove()
@@ -167,7 +198,19 @@ export class Interaction {
   private playSay(): void {
     this.mode = 'talking'
     window.clearTimeout(this.idleTimer)
-    void this.o.player.play({ type: 'say', name: this.nameFor('say'), mood: this.state.mood })
+    const style = this.sayStyle ?? this.sayStyleByMood()
+    const name = this.hasClip('say', style) ? style : this.nameFor('say')
+    void this.o.player.play({ type: 'say', name, mood: this.state.mood })
+  }
+
+  /** 没指定风格的话（普通对话）：开心就 shining，状态差就 serious，一般时 shining / self 随机 */
+  private sayStyleByMood(): SayStyle {
+    switch (this.state.mood) {
+      case 'happy': return 'shining'
+      case 'poorcondition':
+      case 'ill': return 'serious'
+      default: return Math.random() < 0.5 ? 'shining' : 'self'
+    }
   }
 
   /** 模型收到问题、还没吐出首字时循环思考；首字或取消到来后自然播 C 段。 */
@@ -268,6 +311,7 @@ export class Interaction {
     }
     this.lastAt = { x, y }
     this.pressAt = { x, y, screenX, screenY }
+    this.pressOnFace = inPinchZone(this.o.profile, x, y) && this.hasClip('common', 'pinch')
     if (this.mode === 'moving' || this.mode === 'move-exit') {
       this.cancelMove()
       this.toActivity()
@@ -286,11 +330,13 @@ export class Interaction {
   onPointerMove(x: number, y: number, screenX = x, screenY = y): void {
     if (this.disposed) return
     this.lastAt = { x, y }
-    if (this.pressAt && this.mode !== 'raised' &&
+    if (this.pressAt && this.mode !== 'raised' && this.mode !== 'pinching' &&
       Math.hypot(screenX - this.pressAt.screenX, screenY - this.pressAt.screenY) >= DRAG_THRESHOLD_PX) {
       window.clearTimeout(this.pressTimer)
       this.pressTimer = 0
-      this.raise()
+      // 按在脸上拖 = 捏脸（原版 Pinch）；别处拖 = 提起
+      if (this.pressOnFace) this.pinch()
+      else this.raise()
     }
   }
 
@@ -306,6 +352,10 @@ export class Interaction {
     if (this.mode === 'raised') {
       this.released = true // 等当前段播完再落地，落地后 toActivity 解钉
       this.o.onDragChange?.(false)
+      return
+    }
+    if (this.mode === 'pinching') {
+      this.o.player.stop() // 松手：播 C 段放开脸，收尾回当前活动
       return
     }
     if (!wasShortPress) {
@@ -349,6 +399,12 @@ export class Interaction {
     if (this.playPooled()) return
     this.pooled = null
     window.clearTimeout(this.poolTimer)
+    // 这顿是麦当劳：普通动画，不用夹心（汉堡画在动画里）
+    if (this.state.activity === 'eating' && this.mcdonald) {
+      void this.o.player.play({ type: 'common', name: 'eatmcdonald', mood: this.state.mood })
+      this.scheduleIdleAction()
+      return
+    }
     const { type, name } = CLIP_FOR[this.state.activity]
     // Core 指名了具体动作就用它的动画（同是 working，文案≠修屏幕）；这个类型下没有
     // 这个名字（收礼待机时 default 下没有 gift）就随机挑一个，别把不存在的目标交给播放器
@@ -398,7 +454,9 @@ export class Interaction {
    */
   private playPooled(): boolean {
     const activity = this.state.activity
-    const pool = ANIMATION_POOLS[activity]
+    // Core 指名的动画自己有池（跳舞）就用它的，否则按活动
+    const graph = this.state.action?.graph
+    const pool = (graph && ACTION_POOLS[graph]) || ANIMATION_POOLS[activity]
     if (!pool) return false
     const now = Date.now()
     const usable = (e: PoolEntry) => this.hasClip(e.type, e.name)
@@ -420,6 +478,13 @@ export class Interaction {
     }, Math.max(1000, current.until - now))
     window.clearTimeout(this.idleTimer)
     return true
+  }
+
+  /** 体力、心情、饱腹、口渴、健康、好感全在高位 */
+  private feelingGreat(): boolean {
+    const s = this.state
+    return s.strength >= KISS_MIN.strength && s.feeling >= KISS_MIN.feeling && s.hunger >= KISS_MIN.hunger
+      && s.thirst >= KISS_MIN.thirst && s.health >= KISS_MIN.health && s.affection >= KISS_MIN.affection
   }
 
   /** (type, name) 在资源里到底有没有动画（夹心的或普通的任一段） */
@@ -463,6 +528,19 @@ export class Interaction {
       }
     }
 
+    // 全身状态都很好的时候，偶尔来个飞吻（WORK/kiss）
+    if (this.feelingGreat() && Math.random() < KISS_CHANCE && this.hasClip('work', 'kiss')) {
+      void this.o.player.playOnce({ type: 'work', name: 'kiss', mood: this.state.mood })
+      return
+    }
+    // 日常：伸懒腰 / 喝茶（Relax 的 MI、MU）、过生日那套（BDay）
+    if (Math.random() < RELAX_CHANCE) {
+      const names = RELAX_NAMES.filter((n) => this.hasClip('common', n))
+      if (names.length) {
+        void this.o.player.playOnce({ type: 'common', name: pick(names), mood: this.state.mood })
+        return
+      }
+    }
     // 原版的 StateONE / StateTWO 是同一套待机姿态的两阶段变化，不属于 Core 活动。
     if (Math.random() < STATE_IDLE_CHANCE && this.hasClip('stateone', 'state')) {
       this.mode = 'idle-state-one'
@@ -473,6 +551,16 @@ export class Interaction {
     const names = namesFor(this.o.manifest, 'idel', this.state.mood)
     if (names.length) void this.o.player.playOnce({ type: 'idel', name: pick(names), mood: this.state.mood })
     else this.scheduleIdleAction()
+  }
+
+  /** 捏脸：A 段捏住 → B 段循环到松手 → C 段放开。窗口不动，算一次摸头 */
+  private pinch(): void {
+    if (this.mode === 'pinching') return
+    this.mode = 'pinching'
+    window.clearTimeout(this.idleTimer)
+    window.clearTimeout(this.poolTimer)
+    void this.o.player.play({ type: 'common', name: 'pinch', mood: this.state.mood })
+    this.o.onTouch?.('head')
   }
 
   private touch(zone: ClickZone): void {

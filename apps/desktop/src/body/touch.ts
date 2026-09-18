@@ -15,6 +15,11 @@ export function clickZone(p: PetProfile, x: number, y: number): ClickZone | null
   return null
 }
 
+/** 按在脸上：拖动就是捏脸，不是提起 */
+export function inPinchZone(p: PetProfile, x: number, y: number): boolean {
+  return !!p.pinch && inside(p.pinch, x, y)
+}
+
 /** 提起区域按心情不同，只判当前心情那一个（原版给 4 种心情各注册一个 TouchArea，命中后校验 Mode） */
 export function pressZone(p: PetProfile, mood: Mood, x: number, y: number): PressZone | null {
   return inside(p.touchRaised[mood], x, y) ? 'raise' : null

@@ -11,6 +11,7 @@ mod chat;
 mod dock;
 mod kb;
 mod lines;
+mod music;
 mod nudge;
 mod pet_motion;
 mod tts;
@@ -471,6 +472,8 @@ struct NudgeState {
     returned: Option<(Instant, f32)>,
     /// 她最近换过的事：(时刻 ms, 活动, 动作名)，给「你不在的时候我……」用
     her_recent: std::collections::VecDeque<(i64, Activity, String)>,
+    /// 上一次看到的「在不在放歌」，变了才发事件
+    music: Option<bool>,
 }
 
 /// 你多久没动键鼠了（秒）。读不到就当「不知道」——调用方按不在处理
@@ -645,6 +648,16 @@ fn check_nudges(app: &AppHandle, state: &PetState) {
     let idle_max = settings.nudges.idle_max_sec;
     let idle = idle_seconds();
     observe_presence(&mut n, idle.unwrap_or(u32::MAX / 2), idle_max);
+    // 你在不在放歌：变了才告诉状态机（她会去跳 / 停下）
+    let playing = music::playing(now_ms());
+    if n.music.unwrap_or(false) != playing {
+        n.music = Some(playing);
+        log::info!("音乐{}", if playing { "开始了" } else { "停了" });
+        drop(n);
+        apply(app, &Event::Music(playing));
+        let Ok(again) = ns.lock() else { return };
+        n = again;
+    }
 
     if !settings.nudges.enabled || !settings.lines.enabled {
         return;
@@ -719,6 +732,16 @@ fn check_nudges(app: &AppHandle, state: &PetState) {
             }
         });
     }
+}
+
+/// 「放歌」意图刚打开 Spotify：不等下一分钟的检测，立刻让她跳起来
+pub(crate) fn set_music(app: &AppHandle, on: bool) {
+    if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
+        if let Ok(mut n) = ns.lock() {
+            n.music = Some(on);
+        }
+    }
+    apply(app, &Event::Music(on));
 }
 
 /// 说出去、顺手写记忆。账本已经由调用方记过了

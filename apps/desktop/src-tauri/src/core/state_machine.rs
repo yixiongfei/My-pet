@@ -167,6 +167,10 @@ pub struct Pet {
     /// 和 `pinned_tag`（番茄钟）的区别是**有期限**：说一句「去玩会儿」不是让她玩一辈子
     #[serde(default)]
     pub directive: Option<Directive>,
+    /// 你在放音乐（lib.rs 每分钟看一次 Spotify 在不在播）。真的话她放下手头的活跟着跳，
+    /// 歌停了就回到作息。吃饭睡觉照旧压过它
+    #[serde(default)]
+    pub music: bool,
 }
 
 /// 一次性请求答应之后的「保护期」：`target` 是动作 id 或 tag，`left` 是还剩多少分钟。
@@ -205,6 +209,7 @@ impl Default for Pet {
             last_verdict: None,
             biases: Biases::default(),
             directive: None,
+            music: false,
         }
     }
 }
@@ -237,6 +242,8 @@ pub enum Event {
     SetBias { tag: String, weight: f32, half_life: f32 },
     /// 撤掉某条偏好；`None` = 全撤
     ClearBias(Option<String>),
+    /// 你开始 / 停止放音乐。真 → 她去跳舞；假 → 歌停了，该干嘛干嘛
+    Music(bool),
     /// 调试用：直接改数值，用来验证阈值行为
     Patch {
         strength: Option<f32>,
@@ -459,6 +466,16 @@ pub fn reduce(cat: &Catalog, shelf: &FoodShelf, p: &Pet, e: &Event) -> Pet {
         }
         Event::Request { target, roll, minutes } => request(cat, shelf, &mut n, target, *roll, *minutes),
         Event::SetBias { tag, weight, half_life } => n.biases.set(tag, *weight, *half_life),
+        Event::Music(on) => {
+            n.music = *on;
+            // 立刻换过去，不等下一拍。生理急需 / 过场照旧：饿得受不了的时候歌再好听也先吃
+            let urgent = n.state.hunger < STARVING || n.state.thirst < PARCHED || n.state.strength < EXHAUSTED;
+            if *on && !urgent && !n.state.activity.is_transient() {
+                if let Some(a) = best(cat, "music", |a| meets(a, &n.state)) {
+                    adopt(shelf, &mut n, (a, "你在放歌"));
+                }
+            }
+        }
         Event::ClearBias(tag) => match tag {
             Some(t) => {
                 n.biases.clear(t);
@@ -626,9 +643,22 @@ fn tick(cat: &Catalog, shelf: &FoodShelf, n: &mut Pet, minutes: f32, hour: f32) 
             .as_ref()
             .map(|d| (d.target.as_str(), "你让我做的"))
             .or(n.pinned_tag.as_deref().map(|t| (t, "番茄钟")));
-        let chosen = decide_with_pin(cat, &n.state, &n.cooldowns, hour, hold, &n.biases);
+        let chosen = if n.music {
+            // 你在放歌：吃饭睡觉这两件到点的事之外，她都先跟着跳
+            match best(cat, "music", |a| meets(a, &n.state)) {
+                Some(a) if !scheduled_need_now(cat, &n.state, hour) => (a, "你在放歌"),
+                _ => decide_with_pin(cat, &n.state, &n.cooldowns, hour, hold, &n.biases),
+            }
+        } else {
+            decide_with_pin(cat, &n.state, &n.cooldowns, hour, hold, &n.biases)
+        };
         adopt(shelf, n, chosen);
     }
+}
+
+/// 现在是不是到了该睡 / 该吃的点（decide 的 2a 层）。放歌时这两件事仍然排在跳舞前面
+fn scheduled_need_now(cat: &Catalog, s: &PetState, hour: f32) -> bool {
+    ["sleep", "eat"].iter().any(|tag| best(cat, tag, |a| a.is_scheduled() && a.fits_hour(hour) && meets(a, s)).is_some())
 }
 
 /// `target` 既可以是动作 id（`work_copy`）也可以是 tag（`play`）
@@ -651,6 +681,13 @@ fn should_switch(cat: &Catalog, n: &Pet, hour: f32) -> bool {
     }
     // 病重了正事一律放下，去躺着
     if bedridden(cur, &n.state) {
+        return true;
+    }
+    // 歌停了就别跳了；歌在放，除了吃饭睡觉都放下去跳
+    if cur.has_tag("music") && !n.music {
+        return true;
+    }
+    if n.music && !cur.has_tag("music") && !cur.has_tag("need") && !cur.has_tag("sleep") {
         return true;
     }
     // 你刚让她做的事，保护期内只要还在做就别换
@@ -1662,6 +1699,25 @@ mod tests {
         p.state.hunger = 60.0;
         let after = catch_up(&c, &shelf(), &p, 11 * 60 * 60 * 1000, 9.0);
         assert!(after.cooldowns.contains_key("meal") || after.state.activity == Activity::Eating, "七点到九点之间该吃过早饭");
+    }
+
+    #[test]
+    fn 放歌就去跳舞_歌停了就回去干活_饭点照吃() {
+        let c = cat();
+        let mut p = run(&c, Pet::default(), 5, 10.0);
+        assert_eq!(p.state.activity, Activity::Working, "前提：十点在上班");
+        p = reduce(&c, &shelf(), &p, &Event::Music(true));
+        assert_eq!(acting(&p), "dance", "放歌了就该跳");
+        p = run(&c, p, 30, 10.1);
+        assert_eq!(acting(&p), "dance", "歌还在放，半小时后还在跳");
+        p = reduce(&c, &shelf(), &p, &Event::Music(false));
+        p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 10.7 });
+        assert_ne!(acting(&p), "dance", "歌停了就别跳了");
+        // 饭点：歌在放也先吃
+        let mut q = run(&c, Pet::default(), 5, 10.0);
+        q = reduce(&c, &shelf(), &q, &Event::Music(true));
+        q = reduce(&c, &shelf(), &q, &Event::Tick { minutes: 1.0, hour: 12.0 });
+        assert_eq!(q.state.activity, Activity::Eating, "十二点该吃饭，歌再好听也先吃");
     }
 
     #[test]

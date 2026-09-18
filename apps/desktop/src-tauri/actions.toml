@@ -309,6 +309,22 @@ cooldown = 0
 per_min = { strength = 0.2, hunger = 0.0, thirst = 0.0, feeling = 0.0 }
 lines = ["送给我的「{food}」吗？谢谢你，我很喜欢！", "哇，{food}！你怎么知道我想要这个。", "谢谢你的{food}，我会好好珍惜的。"]
 
+# ---------- 放歌：你在放音乐（Spotify 在播）她就跟着跳 ----------
+# 不排时段：`Pet.music` 为真时 decide 直接挑它（排在吃饭睡觉之后、上班之前），歌停了就放下。
+# duration = 0：跟着歌走，不自己结束。Body 的 ACTION_POOLS["music"] 轮换 Music / Music2 / cosplay / ohhhh
+
+[[action]]
+id = "dance"
+name = "跟着歌跳舞"
+activity = "playing"
+graph = "music"
+tags = ["music"]   # 不带 cheer：只有你在放歌时才挑它，心情差不会自己跳起来
+duration = 0
+cooldown = 0
+per_min = { strength = -0.15, hunger = -0.1, thirst = -0.15, feeling = 0.6 }
+requires = { min_strength = 15 }
+lines = ["这首歌好听！", "跟着节奏……哒哒哒。", "放歌啦，我也来跳一段。"]
+
 # ---------- 吃药：用户喂的，她自己不会去买 ----------
 # 走 give_medicine 命令触发（托盘 / 面板），没有 eat / need 标签所以 decide 挑不到它。
 # 借「吃」的夹心动画把药片送进嘴里；药效（health）进 remedy 池按分钟慢慢吸收

@@ -22,6 +22,8 @@ pub enum Intent {
     Focus { minutes: f32, target: Option<String> },
     /// 单纯的提醒：「十分钟后叫我」
     Timer { minutes: f32, label: String },
+    /// 「放首歌」「来点音乐」：打开 Spotify 放歌，她跟着跳
+    Music,
 }
 
 /// 没说多久的番茄钟
@@ -81,7 +83,8 @@ pub fn parse(text: &str) -> Option<Intent> {
     if t.is_empty() || t.chars().count() > 60 {
         return None; // 长篇大论不会是一句命令
     }
-    parse_focus(&t)
+    parse_music(&t)
+        .or_else(|| parse_focus(&t))
         .or_else(|| parse_timer(&t))
         .or_else(|| parse_bias_zh(&t))
         .or_else(|| parse_do_zh(&t))
@@ -90,6 +93,20 @@ pub fn parse(text: &str) -> Option<Intent> {
 }
 
 /// 「帮我设个番茄钟，学习一个小时吧」「专注 50 分钟」「start a 30 min pomodoro」
+/// 「放首歌」「放点音乐」「来点音乐」「play some music」。「别放了」「关掉音乐」不认——停歌由 Spotify 自己管
+fn parse_music(t: &str) -> Option<Intent> {
+    let s = strip_punct(t);
+    if s.chars().count() > 20 {
+        return None;
+    }
+    if ["别放", "关掉", "停", "stop", "pause"].iter().any(|k| s.contains(k)) {
+        return None;
+    }
+    let zh = ["放首歌", "放个歌", "放歌", "放点歌", "放点音乐", "放音乐", "来点音乐", "来首歌", "听歌", "听音乐", "放一首"];
+    let en = ["play music", "play some music", "play a song", "put on music", "put on a song"];
+    (zh.iter().any(|k| s.contains(k)) || en.iter().any(|k| t.contains(k))).then_some(Intent::Music)
+}
+
 fn parse_focus(t: &str) -> Option<Intent> {
     let s = strip_punct(t);
     if !["番茄钟", "番茄", "专注", "pomodoro", "focus session", "focus for", "focus mode", "deep work"].iter().any(|k| s.contains(k)) {

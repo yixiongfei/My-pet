@@ -16,6 +16,8 @@ interface Item {
   audio: Promise<Blob | null>
   /** 0–1；自言自语轻声（Core 给的，默认 1） */
   volume: number
+  /** 说这句时配哪套 say 动画（self / serious / shining / shy）；不给由 Interaction 按心情挑 */
+  style?: string
 }
 
 /** 句末：到这里就可以先送去合成，不用等整段回复说完 */
@@ -30,8 +32,8 @@ const MIN_SENTENCE_CHARS = 4
  */
 export class Speech {
   prefs: VoicePrefs = { enabled: true, speakChat: true, speakLines: true, speed: 1.12, keepPitch: false }
-  /** 开口 / 闭嘴，给 say 动画用 */
-  onTalking: ((talking: boolean) => void) | null = null
+  /** 开口 / 闭嘴，给 say 动画用；开口时带上这句的 say 风格 */
+  onTalking: ((talking: boolean, style?: string) => void) | null = null
   /** 队列空了（不管有没有真的出过声）：气泡可以收了 */
   onIdle: (() => void) | null = null
 
@@ -40,6 +42,7 @@ export class Speech {
   private currentUrl: string | null = null
   private pumping = false
   private talking = false
+  private style: string | undefined
   private disposed = false
 
   allows(kind: SpeechKind): boolean {
@@ -51,7 +54,7 @@ export class Speech {
    * 排一句。`interrupt` = 把还没说完的都扔掉（新的回复来了，旧的就别念了）。
    * 不允许出声的类型直接忽略——气泡照出，只是没声音
    */
-  say(text: string, kind: SpeechKind, opts: { interrupt?: boolean; mood?: string; volume?: number } = {}): void {
+  say(text: string, kind: SpeechKind, opts: { interrupt?: boolean; mood?: string; volume?: number; style?: string } = {}): void {
     if (this.disposed || !this.allows(kind)) return
     const clean = text.trim()
     if (!clean) return
@@ -61,7 +64,7 @@ export class Speech {
     const audio = invokeCore<ArrayBuffer>('tts_speak', { text: clean, mood: opts.mood })
       .then((buf) => (buf && buf.byteLength > 44 ? new Blob([buf], { type: 'audio/wav' }) : null))
       .catch(() => null)
-    this.queue.push({ kind, audio, volume: Math.min(1, Math.max(0, opts.volume ?? 1)) })
+    this.queue.push({ kind, audio, volume: Math.min(1, Math.max(0, opts.volume ?? 1)), style: opts.style })
     void this.pump()
   }
 
@@ -106,9 +109,13 @@ export class Speech {
   }
 
   private setTalking(on: boolean): void {
-    if (this.talking === on) return
+    if (this.talking === on) {
+      // 还在说、只是换了一句：风格不同的话外面会换 say 动画
+      if (on) this.onTalking?.(true, this.style)
+      return
+    }
     this.talking = on
-    this.onTalking?.(on)
+    this.onTalking?.(on, this.style)
   }
 
   private async pump(): Promise<void> {
@@ -122,6 +129,7 @@ export class Speech {
         if (this.disposed || this.queue[0] !== item) continue
         this.queue.shift()
         if (!blob) continue
+        this.style = item.style
         await this.play(blob, item.volume)
       }
     } finally {

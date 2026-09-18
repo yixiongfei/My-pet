@@ -23,6 +23,7 @@ VPet.Core（Rust，apps/desktop/src-tauri/src）
 ├── tts.rs               （语音合成 + 缓存）
 ├── lines.rs             （动作台词：固定 / 模型即兴）
 ├── kb.rs                （本机知识库只读：当天日程 · 到期复习，读它的 .kb/index.db）
+├── music.rs             （Spotify 在不在播：看主窗口标题；「放首歌」打开 spotify: + 媒体键）
 ├── nudge.rs             （主动开口：由头 · 分量 · 每日预算 · 别烦我；纯规则）
 ├── pet_motion.rs        （自主移动 · 侧挂 · 窗口几何 · 出屏弹回）
 ├── dock.rs              （对话窗口贴边收起）

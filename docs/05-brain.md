@@ -23,6 +23,7 @@
 | 多工作一点 · 别玩了 · study more | `Bias { tag, weight }` | `set_bias`（半衰期 120 min） |
 | 帮我设个番茄钟，学习一个小时 | `Focus { minutes, target }` | 专注段 + 头顶倒计时 |
 | 十分钟后叫我 | `Timer { minutes, label }` | `create_timer` |
+| 放首歌 · 放点音乐 · play some music | `Music` | 打开 `spotify:`，没在播就按媒体播放键；`Event::Music(true)` 她立刻去跳 |
 | 记住：… · 忘记… · 你记得我什么 | 记忆命令 | `remember` / `forget` / `recall` |
 
 解析顺序 focus → timer → bias → do；中文先于英文。规则**偏保守**：疑问句（「要不要去玩？」）、过去式（「去玩了吗」）、没有对她说的（「我去睡了」）一律不认——误把闲聊当命令比漏掉一句糟。判定结果写进「此刻」和用户消息后的 `[旁白：…]`，模型顺着说；只有那里写了，她才说自己去做了。

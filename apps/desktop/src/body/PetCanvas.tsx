@@ -24,6 +24,23 @@ const SELF_TALK_HOLD_MS = 6_000
 /** 立绘上方留给气泡 / 倒计时的高度，按立绘边长算。**必须和 src-tauri lib.rs 的 HEAD_ROOM 一致**（窗口高 = 宽 × 1.6） */
 const HEAD_ROOM = 0.6
 
+/**
+ * 各类话配哪套 say 动画（Say/Self · Serious · Shining · Shy）。
+ * 自言自语 → self；日程提醒这类正经话 → serious；收礼 / 吃药的道谢 → shy；
+ * 普通动作台词 → self（那是她随口说的，不是对你说的）
+ */
+function sayStyleForLine(line: { level?: string; action?: string }): string {
+  if (line.level === 'self') return 'self'
+  if (line.action === 'nudge') return 'serious'
+  if (line.action === 'gift' || line.action === 'medicine') return 'shy'
+  return 'self'
+}
+
+/** 对话回复：句子里有害羞 / 道谢 / 亲昵的字眼就 shy，其余按心情（Interaction 里挑） */
+function sayStyleForChat(sentence: string): string | undefined {
+  return /谢谢|害羞|喜欢你|亲|抱|脸红|讨厌啦|才不是/.test(sentence) ? 'shy' : undefined
+}
+
 /** 与 core/scheduler.rs 的 Timer 对应；focus 非空才在头顶显示 */
 interface FocusTimer { id: string; label: string; dueAt: number; focus?: { startedAt: number; target: string | null } | null }
 
@@ -61,7 +78,7 @@ export function PetCanvas() {
    * 桌面上的短句：气泡 + （开了语音就）念出来。念的话气泡等念完再收。
    * `level` 是分量：自言自语小气泡、轻声、早收；搭话（`nudge`）没回应三十秒就收
    */
-  const announce = useCallback((text: string, speak: 'line' | 'none' = 'line', opts: { level?: 'talk' | 'self'; volume?: number; nudge?: boolean } = {}) => {
+  const announce = useCallback((text: string, speak: 'line' | 'none' = 'line', opts: { level?: 'talk' | 'self'; volume?: number; nudge?: boolean; style?: string } = {}) => {
     streamRef.current = null
     setStreaming(false)
     const level = opts.level ?? 'talk'
@@ -72,7 +89,7 @@ export function PetCanvas() {
     const spoken = speak === 'line' && !!speech?.allows('line')
     const hold = level === 'self' ? Math.min(SELF_TALK_HOLD_MS, hideDelayMs(text)) : opts.nudge ? Math.min(NUDGE_HOLD_MS, hideDelayMs(text)) : hideDelayMs(text)
     scheduleHide(spoken ? SPEAKING_HOLD_MS : hold)
-    if (spoken) speech?.say(text, 'line', { volume: opts.volume })
+    if (spoken) speech?.say(text, 'line', { volume: opts.volume, style: opts.style })
   }, [scheduleHide])
 
   /** 语音开关变了（设置页保存）就同步给说话队列 */
@@ -123,7 +140,7 @@ export function PetCanvas() {
       // 还没念的尾巴：最终文本和流式文本的开头一致才接着念，否则（旁白被裁掉了）只念还没念过的部分
       const spokenPrefix = current.text.slice(0, current.spoken)
       const rest = text.startsWith(spokenPrefix) ? text.slice(current.spoken) : current.spoken === 0 ? text : ''
-      if (rest.trim()) speech?.say(rest, 'chat')
+      if (rest.trim()) speech?.say(rest, 'chat', { style: sayStyleForChat(text) })
       return
     }
     window.clearTimeout(hideTimer.current)
@@ -135,7 +152,7 @@ export function PetCanvas() {
       : { id: event.requestId, text: current.text + (event.delta ?? ''), spoken: current.spoken }
     const { ready } = Speech.splitSentences(next.text.slice(next.spoken))
     for (const sentence of ready) {
-      speech?.say(sentence, 'chat')
+      speech?.say(sentence, 'chat', { style: sayStyleForChat(sentence) })
       next.spoken += sentence.length
     }
     streamRef.current = next
@@ -177,7 +194,7 @@ export function PetCanvas() {
         interactionRef.current = interaction
         interaction.start()
         // 出声的时候播 say 动画，说完回到手头的事；念完了气泡再留两秒
-        speech.onTalking = (talking) => (talking ? interaction.startSay() : interaction.endSay())
+        speech.onTalking = (talking, style) => (talking ? interaction.startSay(style) : interaction.endSay())
         speech.onIdle = () => {
           if (streamRef.current) return
           // 没出声（服务没起来）也得让人把字看完：按字数的时长和「念完再留两秒」取长的
@@ -220,6 +237,7 @@ export function PetCanvas() {
               level: line.level === 'self' ? 'self' : 'talk',
               volume: line.volume,
               nudge: line.action === 'nudge',
+              style: sayStyleForLine(line),
             })
           }
         }))

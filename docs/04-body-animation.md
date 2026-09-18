@@ -58,8 +58,13 @@ Core 定活动，Body 按这棵树挑画面：
 │   ├─ Study → 看书 8–15 · 写字 6–12 · 研究 6–12 · 画画 8–15
 │   ├─ Play  → 打游戏 6–12 · 删错误 5–10 · 跳绳 3–6 · 玩水 5–10 · 网球 / 舞蹈 4–8
 │   └─ Sleep → 入睡（A）· 熟睡（B 随机变体）· 醒来（C）
-└─ 无任务（Idle）→ 发呆（default）· StateONE → StateTWO 成对待机 · 四处看 / 小动作（idel，15–40 s 一次）· 走路 / 爬墙 / 坠落（pet_motion）
+│   └─ 跳舞（你在放歌，Core 的 dance）→ ACTION_POOLS.music：Music 3–6 · Music2 2–4 · cosplay 2–4 · ohhhh 1–3
+└─ 无任务（Idle）→ 发呆（default）· StateONE → StateTWO 成对待机 · 四处看 / 小动作（idel，15–40 s 一次）
+                   · 日常（Relax/MI · MU · BDay，三成）· 飞吻（WORK/kiss，全身状态都很高时两成）· 走路 / 爬墙 / 坠落（pet_motion）
 ```
+
+- **按 Core 指名动画开的池**（`ACTION_POOLS[action.graph]`）优先于按活动的池：「跟着歌跳舞」是 playing，但只在舞蹈动画里轮换。
+- **吃饭**：每顿两成概率是 `common/eatmcdonald`（普通动画，汉堡画在里面），其余走夹心动画；进入吃饭时掷一次、整顿不变；吃药不算。
 
 - **每段池动画有自己的驻留时长**（表里的分钟区间随机抽）。驻留没到**不因轮换而换**；到了就在同池里随机换一个**不同的**。刚进活动优先播 Core 指名的（`action.graph`）。
 - 允许打断的只有三种：用户交互、生理急需（Core 换了活动）、活动自然结束（Core 换了活动）。被交互打断后回来**接着播原来那段**，不重抽。
@@ -71,11 +76,12 @@ Core 定活动，Body 按这棵树挑画面：
 | 输入 | 表现 |
 |---|---|
 | 摸头 / 摸身（`vup.json.profile` 的 touchhead / touchbody 区域） | `touch_head` / `touch_body` 三段式一遍，回到当前活动 |
+| 按在脸上拖（`pinch` 区域） | 捏脸 `common/pinch`：A 捏住 → B 循环到松手 → C 放开；窗口不动，算一次摸头 |
 | 按住拖动 | `raised_dynamic` 挣扎三次 → `raised_static`；窗口在 Rust 侧跟随物理光标；松手落地 |
 | 松手出屏 | 不到侧挂份上的一律**弹回**当前显示器（头顶区可以在屏幕外，身体不行） |
 | 拖过左 / 右边 50 逻辑像素 | 侧挂：`sidehide_*_main` A→B；hover 播 `rise`；按下播 main C 并完整回到屏幕 |
 | 真正空闲 | 按原版 16 条 `move` 规则走路 / 爬行 / 爬墙 / 顶部移动 / 坠落；位移在 Core 50 ms 轮询里按规则 Interval 推，每步做边界检查 |
-| 说话（TTS 在放） | 循环 `say`；一次性动画播完再接；提起时不说话 |
+| 说话（TTS 在放） | 按这句话的类别循环 `say/*`：自言自语 / 动作台词 → `self`；日程提醒、状态差时 → `serious`；开心时的对话 → `shining`；道谢 / 害羞字眼 → `shy`；换句换风格才换动画；一次性动画播完再接；提起时不说话 |
 | 启动 / 托盘退出 | `startup` 一次；退出先播 `shutdown`，完成后才结束进程（8 s 超时兜底） |
 | 等模型首字 | `common/think` A → B 循环；首字、取消或失败时播 C 回当前活动 |
 | 升级 / 心情变化 | `common/levelup`；心情上升 `switch_up`、下降 `switch_down` |

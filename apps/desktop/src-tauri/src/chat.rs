@@ -859,6 +859,16 @@ fn handle_intent(app: &AppHandle, i: &Intent) -> (String, Option<String>) {
                 Err(e) => (format!("你想设提醒但没设成（{e}）。"), None),
             }
         }
+        Intent::Music => match crate::music::play_via_spotify(app) {
+            Ok(()) => {
+                crate::set_music(app, true);
+                (
+                "你刚打开了 Spotify 放歌，正跟着跳。用自己的话简短回应一句。".into(),
+                Some("好，放歌啦！我也来跳一段。".into()),
+                )
+            }
+            Err(e) => (format!("你想放歌但没放成（{e}）。"), Some(format!("放不了歌：{e}"))),
+        },
         Intent::Bias { tag, weight } => {
             let label = match tag.as_str() { "work" => "工作", "study" => "学习", _ => "玩" };
             crate::set_bias(app.clone(), tag.clone(), *weight, None);
