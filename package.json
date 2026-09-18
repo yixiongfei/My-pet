@@ -1,7 +1,7 @@
 {
   "name": "vpet-agent",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "VPet 重构：有身体的 Personal Agent（Tauri 2 + React + Rust core + TS brain）",
   "packageManager": "pnpm@12.4.2",
   "scripts": {

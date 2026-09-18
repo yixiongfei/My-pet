@@ -1,6 +1,12 @@
 # Changelog
 
-## 未发布 · Phase 1「Body MVP」+ Phase 2 状态机
+## 未发布
+
+### 新增
+
+### 修复
+
+## v0.1.0 · 2026-09-18
 
 ### 新增
 - **发布脚本** `pnpm release:github`（[scripts/publish-release.ps1](scripts/publish-release.ps1)）：干净工作区 → 测试 → 版本号写进四处 → CHANGELOG「未发布」改成本版 → `tauri build`（NSIS 安装包 + 便携 zip）→ `release: vX.Y.Z` 提交 + tag → push → `gh release create`（说明取自 CHANGELOG）→ 重新拉起桌宠。`-DryRun` 只打包不提交。
