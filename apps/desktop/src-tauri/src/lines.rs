@@ -160,13 +160,86 @@ fn emit(app: &AppHandle, a: &ActionRef, text: String, spoken: bool) {
 
 /// 不挂在哪个动作上的一句话（生病了、没病不用吃药）。走台词总开关，不受间隔限制——
 /// 这类话一天说不了几次，每一次都该让人听见
-pub fn say(app: &AppHandle, tag: &str, text: &str) {
+pub fn say(app: &AppHandle, tag: &str, text: &str) -> bool {
     let enabled = chat::current_settings(app).map(|s| s.lines.enabled).unwrap_or(true);
     if !enabled {
-        return;
+        return false;
     }
     log::info!("{tag}：{text}");
     let _ = app.emit("pet:line", Line { text: text.into(), action: tag.into(), spoken: true });
+    true
+}
+
+/// 模型改写一句提醒最多等这么久；超时就说原句。「该开始了」是有时效的，不能等模型慢悠悠加载
+const IN_CHARACTER_TIMEOUT: Duration = Duration::from_secs(25);
+
+/// 把一句「事实」交给模型，用她的口吻说出来（日程提醒用）。事实里的时间、数字不能变——
+/// 改写完会核对原句里每个 `HH:MM` 都还在，不在就退回原句。模型不在 / 超时 / 写砸了也退回原句。
+/// 返回 false = 台词总开关关着，一个字都不会说
+pub fn say_in_character(app: &AppHandle, tag: &str, facts: &str) -> bool {
+    let Ok(settings) = chat::current_settings(app) else { return false };
+    if !settings.lines.enabled {
+        return false;
+    }
+    let mood = crate::pet_snapshot(app).mood;
+    let app = app.clone();
+    let tag = tag.to_string();
+    let facts = facts.to_string();
+    tauri::async_runtime::spawn(async move {
+        let styled = tokio::time::timeout(IN_CHARACTER_TIMEOUT, rephrase(&settings, &facts, mood)).await;
+        let text = match styled {
+            Ok(Ok(t)) => t,
+            Ok(Err(e)) => {
+                log::info!("提醒没让模型改写（{e}），说原句");
+                facts.clone()
+            }
+            Err(_) => {
+                log::info!("模型改写提醒超时，说原句");
+                facts.clone()
+            }
+        };
+        log::info!("{tag}：{text}");
+        let _ = app.emit("pet:line", Line { text, action: tag, spoken: true });
+    });
+    true
+}
+
+/// 用她的口吻复述一句事实。只给人设和事实，不给别的——4B/9B 模型给多了就开始发挥
+async fn rephrase(settings: &ChatSettings, facts: &str, mood: Mood) -> Result<String, String> {
+    let p = &settings.persona;
+    let mood = mood_word(mood);
+    let system = format!(
+        "你是{}。性格：{}。说话方式：{}。你现在{}。\n\
+         你要顺口提醒用户下面这件事（这是事实，时间和数字一个都不能改，也不能添加没有的安排）：\n{}\n\
+         用一到两句话、不超过 40 个字，像熟悉的朋友随口提一句，可以带一点你的语气。\
+         不要列清单、不要反问、不要解释。只输出这句话本身：不要引号、不要动作描写。",
+        p.name, p.personality, p.speaking_style, mood, facts
+    );
+    let raw = chat::complete(settings, &system, "开口吧。", 80, 0.8).await?;
+    let text = tidy(&raw, &p.name);
+    if text.is_empty() || text.chars().count() > 70 {
+        return Err(format!("不像一句提醒：{raw:?}"));
+    }
+    if let Some(missing) = clocks_in(facts).into_iter().find(|c| !text.contains(c.as_str())) {
+        return Err(format!("把时间 {missing} 弄丢了：{text:?}"));
+    }
+    Ok(text)
+}
+
+/// 句子里所有 `HH:MM`。改写后核对用
+fn clocks_in(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + 4 < chars.len() {
+        if chars[i].is_ascii_digit() && chars[i + 1].is_ascii_digit() && chars[i + 2] == ':' && chars[i + 3].is_ascii_digit() && chars[i + 4].is_ascii_digit() {
+            out.push(chars[i..i + 5].iter().collect());
+            i += 5;
+        } else {
+            i += 1;
+        }
+    }
+    out
 }
 
 /// 她刚开始做 `a`。`force` = 不受间隔限制（收礼物必须当场有反应）。
@@ -313,6 +386,12 @@ fn tidy(line: &str, name: &str) -> String {
 mod tests {
     use super::*;
     use crate::core::state_machine::FoodRef;
+
+    #[test]
+    fn 改写提醒时时间一个都不能丢() {
+        assert_eq!(clocks_in("今天排了 3 件事，20:00 从「高数」开始；21:30 第二件"), ["20:00", "21:30"]);
+        assert!(clocks_in("有 3 篇笔记到期该复习了").is_empty());
+    }
 
     fn action(id: &str, food: Option<&str>) -> ActionRef {
         ActionRef {

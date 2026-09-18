@@ -1,19 +1,34 @@
 ﻿param(
     # 只报告会删什么，不动手
     [switch]$DryRun,
-    # 连 release 的编译缓存（target\release，2–3 GB）也清掉；下次 pnpm release 要多等几分钟
+    # 连当前正式版 exe / 安装包也删除；通常不要用
     [switch]$Deep
 )
-# 只留正式版：清掉本机所有「不是当前 release exe」的副本和可重建的中间产物。
-# 会删：debug 构建（tauri dev 用，9 GB）、前端 dist、TTS 引擎的旧 CPU 构建、探针 / 测试音频、拉模型的日志、
-#       桌面上残留的 vpet*.exe 副本。
+# 只留正式版：清掉本机所有可重建的中间产物和旧版本副本。
+# 会删：debug 构建、release 链接缓存、前端 dist、旧版安装包、TTS 的旧 CPU 构建、探针 / 测试音频、
+#       拉模型日志、Codex 临时日志，以及桌面上残留的 vpet*.exe 副本。
 # 不删：target\release\vpet.exe（正式版）、.runtime\ollama、.runtime\models、.runtime\qwentts\build-dl、.runtime\tts-models。
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtime = Join-Path $projectRoot '.runtime'
+$release = Join-Path $projectRoot 'apps\desktop\src-tauri\target\release'
+$versionLine = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') |
+    Where-Object { $_ -match '^\s*"version"\s*:' } | Select-Object -First 1
+if ($versionLine -notmatch '"version"\s*:\s*"([^"]+)"') { throw 'package.json version not found' }
+$currentVersion = $Matches[1]
 $targets = @(
     (Join-Path $projectRoot 'apps\desktop\src-tauri\target\debug'),
     (Join-Path $projectRoot 'apps\desktop\dist'),
+    (Join-Path $release '.fingerprint'),
+    (Join-Path $release 'build'),
+    (Join-Path $release 'deps'),
+    (Join-Path $release 'examples'),
+    (Join-Path $release 'incremental'),
+    (Join-Path $release '.cargo-artifact-lock'),
+    (Join-Path $release '.cargo-build-lock'),
+    (Join-Path $release '.cargo-lock'),
+    (Join-Path $release 'vpet.d'),
+    (Join-Path $release 'vpet.pdb'),
     (Join-Path $runtime 'qwentts\build'),
     (Join-Path $runtime 'qwentts\build-cpu.cmd'),
     (Join-Path $runtime 'qwentts\build-cpu.log'),
@@ -27,10 +42,16 @@ $targets = @(
     (Join-Path $runtime 'ollama-windows-amd64.zip')
 )
 $targets += Get-ChildItem -LiteralPath $runtime -Filter 'pull-*.log' -ErrorAction SilentlyContinue | ForEach-Object FullName
+$targets += Get-ChildItem -LiteralPath $projectRoot -Filter '.codex-*.log' -File -ErrorAction SilentlyContinue | ForEach-Object FullName
+# GitHub 已保存每个正式版；本机 bundle 只留与 package.json 同版本的安装包和便携包。
+$bundle = Join-Path $release 'bundle'
+$targets += Get-ChildItem -LiteralPath $bundle -Recurse -File -Filter 'VPet_*' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notlike "VPet_${currentVersion}_*" } |
+    ForEach-Object FullName
 # 旧版曾把 exe 复制到桌面；桌面上的副本和仓库里的 release 同时跑会说重话
 $desktop = [Environment]::GetFolderPath('Desktop')
 $targets += Get-ChildItem -LiteralPath $desktop -Filter 'vpet*.exe' -ErrorAction SilentlyContinue | ForEach-Object FullName
-if ($Deep) { $targets += (Join-Path $projectRoot 'apps\desktop\src-tauri\target\release') }
+if ($Deep) { $targets += $release }
 
 function Size-Of($path) {
     if (Test-Path -LiteralPath $path -PathType Container) {
@@ -57,4 +78,6 @@ foreach ($t in $targets) {
     if (-not $DryRun) { Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue }
 }
 Write-Host ("{0} {1:N1} GB" -f $(if ($DryRun) { 'Would free' } else { 'Freed' }), ($total / 1GB)) -ForegroundColor Green
-Write-Host "Kept: target\release\vpet.exe, .runtime\ollama, .runtime\models, .runtime\qwentts\build-dl, .runtime\tts-models"
+if (-not $Deep) {
+    Write-Host "Kept: target\release\vpet.exe, current-version bundle, .runtime\ollama, .runtime\models, .runtime\qwentts\build-dl, .runtime\tts-models"
+}

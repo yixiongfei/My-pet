@@ -968,23 +968,31 @@ fn stable_hash(text: &str) -> u64 {
     })
 }
 
-/// 把「上次记录到现在」这段离线时间一次性补上。
+/// 补算时一拍最多这么长（分钟）。补两小时不能是「一口气干两小时活」：
+/// 真在跑的时候她心情掉到 15 就会放下活去玩，一整拍补完就没有这个中途决策——
+/// 两小时清屏一次性扣 105 点心情，回来时她已经崩到 0，这是真发生过的事。
+/// 按五分钟一拍分片，决策点和真跑的时候一样多（最多 24 次 reduce，可忽略）
+const CATCHUP_STEP_MIN: f32 = 5.0;
+
+/// 把「上次记录到现在」这段离线时间补上。
 ///
 /// 这是 `reduce` 保持纯函数换来的直接好处：补两小时和跑两小时走的是同一段代码。
+/// `hour` 是 `now_ms` 那一刻的钟点，每一片按往回推的时间算自己的钟点——
+/// 补的是「昨晚到现在」，睡觉和早饭都得在各自的点上发生
 pub fn catch_up(cat: &Catalog, shelf: &FoodShelf, p: &Pet, now_ms: i64, hour: f32) -> Pet {
     let minutes = (now_ms - p.state.updated_at).max(0) as f32 / 60_000.0;
     if minutes < 1.0 {
         return p.clone();
     }
-    reduce(
-        cat,
-        shelf,
-        p,
-        &Event::Tick {
-            minutes: minutes.min(MAX_CATCHUP_MIN),
-            hour,
-        },
-    )
+    let mut left = minutes.min(MAX_CATCHUP_MIN);
+    let mut n = p.clone();
+    while left > 0.0 {
+        let step = left.min(CATCHUP_STEP_MIN);
+        let at = (hour - left / 60.0).rem_euclid(24.0);
+        n = reduce(cat, shelf, &n, &Event::Tick { minutes: step, hour: at });
+        left -= step;
+    }
+    n
 }
 
 /// 四套动画对应的四种状态（docs/03 §3）：健康 < 25 → Ill；体力 < 20 或心情 < 40 →
@@ -1627,11 +1635,33 @@ mod tests {
         let p = Pet::default();
         let after = catch_up(&c, &shelf(), &p, 3 * 24 * 60 * 60 * 1000, 10.0);
         assert!(after.state.hunger > 0.0, "离线三天回来不该饿到脱力");
-        assert_ne!(
-            after.state.mood,
-            Mood::PoorCondition,
-            "长时间没开不该一上来就是坏心情（docs/01）"
-        );
+        // 补算走的是正常作息：回来时她可能刚上完一小时班、心情一般，
+        // 但绝不会是崩溃的——那才是「你冷落了我」（docs/01）
+        assert!(after.state.feeling > MISERABLE, "长时间没开不该一上来就崩溃：{}", after.state.feeling);
+        assert_ne!(after.state.mood, Mood::Ill);
+    }
+
+    #[test]
+    fn 补算不会一口气把活干到心情崩溃() {
+        // 真跑的时候心情掉到 15 就会放下活去玩；补算两小时也得有这个中途决策
+        let c = cat();
+        let mut p = run(&c, Pet::default(), 5, 10.0);
+        assert_eq!(p.state.activity, Activity::Working, "前提：十点在上班");
+        p.state.feeling = 30.0;
+        p.state.updated_at = 0;
+        let after = catch_up(&c, &shelf(), &p, 2 * 60 * 60 * 1000, 12.0);
+        assert!(after.state.feeling > 15.0, "补算完心情崩到了 {}——中途没去放松", after.state.feeling);
+    }
+
+    #[test]
+    fn 补算时每一片按自己的钟点走() {
+        // 22 点存的档，早上 9 点打开：补的两小时是 7–9 点，该吃早饭而不是按 9 点的作息去上班
+        let c = cat();
+        let mut p = run(&c, Pet::default(), 3, 22.0);
+        p.state.updated_at = 0;
+        p.state.hunger = 60.0;
+        let after = catch_up(&c, &shelf(), &p, 11 * 60 * 60 * 1000, 9.0);
+        assert!(after.cooldowns.contains_key("meal") || after.state.activity == Activity::Eating, "七点到九点之间该吃过早饭");
     }
 
     #[test]

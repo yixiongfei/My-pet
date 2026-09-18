@@ -190,6 +190,15 @@ impl Db {
             .optional()
     }
 
+    /// 小账本（今天提醒过哪些）：值是调用方自己序列化的 JSON。读不到当没有
+    pub fn kv_get(&self, key: &str) -> Option<String> {
+        self.take(key).ok().flatten()
+    }
+
+    pub fn kv_put(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.put(key, value)
+    }
+
     /* ---------- 长期记忆（docs/05 §3） ---------- */
 
     /// 写一条。id 冲突就整条覆盖——`plan_write` 已经决定了是新增还是更新，

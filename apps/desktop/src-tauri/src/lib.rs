@@ -9,7 +9,9 @@ mod core;
 mod desktop_settings;
 mod chat;
 mod dock;
+mod kb;
 mod lines;
+mod nudge;
 mod pet_motion;
 mod tts;
 
@@ -33,7 +35,7 @@ use core::memory::{
 };
 use std::collections::HashMap;
 use core::obey::Verdict;
-use core::state_machine::{catch_up, reduce, Directive, Event, Pet, PetState, Touch, MAX_CATCHUP_MIN};
+use core::state_machine::{catch_up, reduce, Activity, Directive, Event, Pet, PetState, Touch, MAX_CATCHUP_MIN};
 
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem},
@@ -287,6 +289,9 @@ fn spawn_pet_clock(app: AppHandle) {
             let gap_min = (now - st.state.updated_at) as f32 / 60_000.0;
             let mut next = if st.state.updated_at > 0 && gap_min >= STALL_MIN {
                 log::info!("时钟停了 {gap_min:.0} 分钟（待机？），补算 {:.0} 分钟", gap_min.min(MAX_CATCHUP_MIN));
+                if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
+                    if let Ok(mut n) = ns.lock() { n.woke_at = Some(Instant::now()); }
+                }
                 catch_up(&cat, &shelf, &st, now, hour_now())
             } else {
                 reduce(
@@ -334,6 +339,7 @@ fn spawn_pet_clock(app: AppHandle) {
             }
             fire_due_timers(&app);
             advance_pomodoro(&app, TICK.as_secs_f32());
+            check_nudges(&app, &next.state);
 
             if last_persist.elapsed() >= PERSIST_EVERY {
                 last_persist = Instant::now();
@@ -434,6 +440,170 @@ fn cancel_focus(app: AppHandle) -> bool {
     }
     let _ = app.emit("focus:ended", &cancelled);
     true
+}
+
+/* ==================== 主动提醒 ==================== */
+
+/// 多久看一次日程。提醒的粒度是分钟，没必要每拍都去开知识库
+const NUDGE_EVERY: Duration = Duration::from_secs(60);
+/// 提醒的静音时段（钟点）：和作息、台词一致——夜里她睡了，你也该睡了
+const NUDGE_QUIET_FROM: f32 = 23.0;
+const NUDGE_QUIET_UNTIL: f32 = 8.0;
+
+/// 提醒的账本：今天说过哪些、上一条什么时候。`said` 同时落在 `kv` 里，重启不重复
+#[derive(Default)]
+struct NudgeState {
+    day: String,
+    said: std::collections::HashSet<String>,
+    last_said: Option<Instant>,
+    last_check: Option<Instant>,
+    /// 最近一次从待机醒来（时钟停过）。醒来头几分钟不开口
+    woke_at: Option<Instant>,
+}
+
+/// 你多久没动键鼠了（秒）。读不到就当「不知道」——调用方按不在处理
+#[cfg(target_os = "windows")]
+fn idle_seconds() -> Option<u32> {
+    #[repr(C)]
+    struct LastInputInfo {
+        cb_size: u32,
+        dw_time: u32,
+    }
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetLastInputInfo(plii: *mut LastInputInfo) -> i32;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetTickCount() -> u32;
+    }
+    let mut info = LastInputInfo { cb_size: std::mem::size_of::<LastInputInfo>() as u32, dw_time: 0 };
+    // SAFETY: 结构体按 Win32 的 LASTINPUTINFO 布局，cbSize 已填；两个调用都不保留指针
+    unsafe {
+        if GetLastInputInfo(&mut info) == 0 {
+            return None;
+        }
+        Some(GetTickCount().wrapping_sub(info.dw_time) / 1000)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn idle_seconds() -> Option<u32> {
+    None
+}
+
+/// 心跳每分钟来问一次：现在该不该提醒。这里只管「能不能开口」的门——
+/// 开着、白天、她醒着、你在、不是刚从待机醒来——说什么由 `nudge::pick` 定
+fn check_nudges(app: &AppHandle, state: &PetState) {
+    let Some(ns) = app.try_state::<Mutex<NudgeState>>() else { return };
+    let Ok(mut n) = ns.lock() else { return };
+    if n.last_check.is_some_and(|t| t.elapsed() < NUDGE_EVERY) {
+        return;
+    }
+    n.last_check = Some(Instant::now());
+
+    let Ok(settings) = chat::current_settings(app) else { return };
+    if !settings.nudges.enabled || !settings.lines.enabled {
+        return;
+    }
+    let hour = hour_now();
+    if hour >= NUDGE_QUIET_FROM || hour < NUDGE_QUIET_UNTIL || state.activity == Activity::Sleeping {
+        return;
+    }
+    if n.woke_at.is_some_and(|t| t.elapsed().as_secs_f32() / 60.0 < nudge::WAKE_GRACE_MIN) {
+        return;
+    }
+    // 人不在就不说：说了也没人听，回来看到一堆气泡才是吵
+    match idle_seconds() {
+        Some(idle) if idle <= settings.nudges.idle_max_sec => {}
+        _ => return,
+    }
+    let Some(db_path) = kb::locate() else { return };
+
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    if n.day != today {
+        n.day = today.clone();
+        n.said = app
+            .try_state::<Mutex<Db>>()
+            .and_then(|db| db.lock().ok().and_then(|d| d.kv_get(&format!("nudge:said:{today}"))))
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        n.last_said = None;
+    }
+
+    let agenda = match kb::agenda(&db_path, &today) {
+        Ok(a) => a,
+        Err(e) => {
+            log::warn!("读不到知识库日程：{e}");
+            return;
+        }
+    };
+    let minute_of_day = (hour * 60.0) as u32;
+    let since_last = n.last_said.map(|t| t.elapsed().as_secs_f32() / 60.0);
+    let Some(pick) = nudge::pick(&agenda, minute_of_day, &n.said, since_last, settings.nudges.lead_min) else { return };
+    drop(n);
+    deliver_nudge(app, pick, &today);
+}
+
+/// 说出去、记账、顺手写记忆。`check_nudges` 和「你主动问今天安排」共用
+fn deliver_nudge(app: &AppHandle, pick: nudge::Nudge, today: &str) {
+    // 事实交给模型用她的口吻说；模型不在 / 超时 / 改丢了时间就说原句
+    if !lines::say_in_character(app, "nudge", &pick.text) {
+        return;
+    }
+    if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
+        if let Ok(mut n) = ns.lock() {
+            if n.day != today {
+                n.day = today.to_string();
+                n.said.clear();
+            }
+            n.said.insert(pick.key.clone());
+            n.last_said = Some(Instant::now());
+            if let Some(db) = app.try_state::<Mutex<Db>>() {
+                if let Ok(d) = db.lock() {
+                    let json = serde_json::to_string(&n.said).unwrap_or_else(|_| "[]".into());
+                    if let Err(e) = d.kv_put(&format!("nudge:said:{today}"), &json) {
+                        log::warn!("提醒账本没记上：{e}");
+                    }
+                }
+            }
+        }
+    }
+    // 今天的安排顺手写进她的记忆（system_event，当天过期）：被问「今晚学什么」答得上来。
+    // 同一天再写会更新同一条，不会堆一摞
+    if let Some(text) = pick.remember {
+        let end_of_day = chrono::Local::now().date_naive().and_hms_opt(23, 59, 0)
+            .and_then(|t| t.and_local_timezone(chrono::Local).single())
+            .map(|t| t.timestamp_millis() - now_ms())
+            .unwrap_or(12 * 3_600_000)
+            .max(60_000);
+        if let Err(e) = remember(app.clone(), text, Some("temporary_context".into()), Some(60.0), Some(1.0), Some("system_event".into()), Some(end_of_day)) {
+            log::warn!("今天的安排没记进记忆：{e}");
+        }
+    }
+}
+
+/// 你主动要她说今天的安排（托盘 / 面板）：不看钟点、不看说没说过。返回她说的那句
+#[tauri::command]
+fn say_agenda(app: AppHandle) -> Result<String, String> {
+    let db = kb::locate().ok_or("这台电脑上没找到知识库")?;
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let agenda = kb::agenda(&db, &today)?;
+    let Some(pick) = nudge::brief_now(&agenda) else {
+        lines::say(&app, "nudge", "今天没排事，也没有要复习的。");
+        return Ok("今天没排事，也没有要复习的。".into());
+    };
+    let text = pick.text.clone();
+    deliver_nudge(&app, pick, &today);
+    Ok(text)
+}
+
+/// 面板 / 调试：今天的日程长什么样（知识库没装就是 None）
+#[tauri::command]
+fn kb_agenda() -> Option<kb::Agenda> {
+    let db = kb::locate()?;
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    kb::agenda(&db, &today).map_err(|e| log::warn!("读不到知识库日程：{e}")).ok()
 }
 
 /// 落一条状态流水。存不进去不该影响宠物继续跑——大不了这次的数值丢了
@@ -1608,6 +1778,7 @@ pub fn run() {
             app.manage(RwLock::new(EmbedSlot::default()));
             app.manage(RwLock::new(EmbedState::Disabled { reason: "还没开始加载".into() }));
             app.manage(lines::LineClock::default());
+            app.manage(Mutex::new(NudgeState::default()));
             let desktop = desktop_settings::init(app.handle());
             if let Err(e) = chat::init(app.handle()) {
                 log::error!("对话初始化失败: {e}");
@@ -1666,6 +1837,8 @@ pub fn run() {
             list_gifts,
             give_medicine,
             list_medicines,
+            kb_agenda,
+            say_agenda,
             tts_speak,
             tts_status,
             list_actions,
@@ -1776,8 +1949,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let chat = MenuItem::with_id(app, "chat", "和她聊聊…", true, None::<&str>)?;
     let gift = MenuItem::with_id(app, "gift", "送她礼物", true, None::<&str>)?;
     let medicine = MenuItem::with_id(app, "medicine", "喂她吃药", true, None::<&str>)?;
+    let agenda = MenuItem::with_id(app, "agenda", "今天有什么安排", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&toggle, &chat, &panel, &gift, &medicine, &passthrough, &quit])?;
+    let menu = Menu::with_items(app, &[&toggle, &chat, &panel, &agenda, &gift, &medicine, &passthrough, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .menu(&menu)
@@ -1794,6 +1968,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "medicine" => {
                 if let Err(e) = give_medicine(app.clone(), None) { log::info!("没喂成药：{e}"); }
+            }
+            "agenda" => {
+                if let Err(e) = say_agenda(app.clone()) { log::info!("说不了今天的安排：{e}"); }
             }
             "passthrough" => toggle_passthrough(app),
             "quit" => { let _ = request_shutdown(app.clone()); }

@@ -36,6 +36,15 @@ export interface ChatSettings {
   persona: Persona
   voice: VoiceSettings
   lines: LineSettings
+  /** 按知识库日程的主动提醒（nudge.rs）。面板暂时不改它，但保存设置时要原样带回去 */
+  nudges: NudgeSettings
+}
+export interface NudgeSettings {
+  enabled: boolean
+  /** 开始前多少分钟提醒 */
+  leadMin: number
+  /** 多久没动键鼠算不在（秒） */
+  idleMaxSec: number
 }
 export interface ActionInfo { id: string; name: string; defaultLines: string[] }
 /** 与 core/scheduler.rs 的 Timer 一致；focus 非空 = 专注段，头顶有倒计时 */
@@ -64,10 +73,12 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   keepPitch: false, speakChat: true, speakLines: true,
 }
 export const DEFAULT_LINE_SETTINGS: LineSettings = { enabled: true, mode: 'fixed', minGapSec: 45, actions: {} }
+/** 与 nudge.rs 的 NudgeSettings::default 成对改 */
+export const DEFAULT_NUDGE_SETTINGS: NudgeSettings = { enabled: true, leadMin: 15, idleMaxSec: 300 }
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   model: 'qwen3.5:9b', endpoint: 'http://127.0.0.1:11434', temperature: 0.75,
-  voice: DEFAULT_VOICE_SETTINGS, lines: DEFAULT_LINE_SETTINGS,
+  voice: DEFAULT_VOICE_SETTINGS, lines: DEFAULT_LINE_SETTINGS, nudges: DEFAULT_NUDGE_SETTINGS,
   // 与 chat.rs 的 Persona::default 保持一致；真正生效的是 Core 里的那份，这里只是加载前的占位
   persona: {
     name: '萝莉斯',

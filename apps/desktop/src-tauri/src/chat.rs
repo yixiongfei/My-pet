@@ -60,6 +60,8 @@ pub struct ChatSettings {
     pub voice: VoiceSettings,
     /// 动作台词（lines.rs）
     pub lines: LineSettings,
+    /// 按知识库日程的主动提醒（nudge.rs）
+    pub nudges: crate::nudge::NudgeSettings,
 }
 
 impl Default for ChatSettings {
@@ -72,6 +74,7 @@ impl Default for ChatSettings {
             persona: Persona::default(),
             voice: VoiceSettings::default(),
             lines: LineSettings::default(),
+            nudges: crate::nudge::NudgeSettings::default(),
         }
     }
 }
@@ -689,10 +692,20 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
     }
     // 「去玩会儿」「休息一下吧」：先进状态机过服从判定，再把结果告诉模型，
     // 这样她嘴上说的和身体做的是同一件事。判定不出气泡——回复本身就是她的回答
-    let mut now = Situation { state: describe_state(&crate::pet_snapshot(&app)), ..Default::default() };
+    // 用户今天的日程（知识库）也进「此刻」：被问「今晚学什么」要答得上来，而且不能编
+    let agenda = crate::nudge::describe_agenda();
+    let situation = |app: &AppHandle| {
+        let mut s = describe_state(&crate::pet_snapshot(app));
+        if let Some(a) = agenda.as_deref() {
+            s.push('\n');
+            s.push_str(a);
+        }
+        s
+    };
+    let mut now = Situation { state: situation(&app), ..Default::default() };
     if let Some(i) = intent::parse(&text) {
         let (note, fallback) = handle_intent(&app, &i);
-        now.state = describe_state(&crate::pet_snapshot(&app));
+        now.state = situation(&app);
         now.note = Some(note);
         now.fallback = fallback;
     }

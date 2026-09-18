@@ -8,7 +8,7 @@ import { Panel } from './Panel'
 
 /**
  * 设置页：上面是给用户看的「陪伴设置」（显示大小 / 个性 / 模型 / 礼物），
- * 下面折叠着原来的调试面板——数值、记忆、工具调用都还在，只是不再是首屏。
+ * 下面折叠状态与调试工具，视觉与设置页共用同一套浅色卡片。
  */
 function SettingsPage() {
   const openChat = () => {
@@ -27,9 +27,9 @@ function SettingsPage() {
         </button>
       </header>
       <CompanionSettings />
-      <details className="legacy-details">
-        <summary>状态与调试面板（数值 · 记忆 · 计时器 · 工具调用）</summary>
-        <div className="legacy-panel">
+      <details className="diagnostics-details">
+        <summary>状态与调试</summary>
+        <div className="diagnostics-panel">
           <Panel />
         </div>
       </details>

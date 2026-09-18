@@ -32,4 +32,5 @@ pnpm build:assets      # 约 3–5 分钟，生成 apps/desktop/public/pet/
 
 正常构建只读取版本化的 `vup.json` / `food.json`，不会再读任何 LPS。需要从原版素材重新迁移时
 再次运行对应的 convert 命令（会覆盖 JSON）；结构由 `schemas/pet-source-v1.schema.json` 和
-`schemas/food-source-v1.schema.json` 描述，构建时也会校验路径、枚举和文件。
+`schemas/food-source-v1.schema.json` 描述，构建时也会校验路径、枚举和文件。迁移并核对完成后，
+本机的 `*.lps` 可以删除；以后若要从原版重做，重新复制原始 LPS 再执行 convert 即可。
