@@ -91,11 +91,13 @@ export function PetCanvas() {
     if (event.reset && current?.id === event.requestId) {
       // 模型重来了一次：已经念出去的作废，气泡清空
       speech?.interrupt()
+      interactionRef.current?.startThink()
       current = null
       streamRef.current = null
       setBubble(null)
     }
     if (event.done) {
+      interactionRef.current?.endThink()
       if (current?.id !== event.requestId) return
       streamRef.current = null
       setStreaming(false)
@@ -114,6 +116,7 @@ export function PetCanvas() {
     }
     window.clearTimeout(hideTimer.current)
     const fresh = !current || current.id !== event.requestId
+    if ((event.delta ?? '').length > 0) interactionRef.current?.endThink()
     if (fresh) speech?.interrupt() // 新的回复来了，旧的别念了
     const next = !current || fresh
       ? { id: event.requestId, text: event.delta ?? '', spoken: 0 }
@@ -175,9 +178,22 @@ export function PetCanvas() {
         void invokeCore<unknown>('get_chat_settings').then((s) => { if (!disposed) applyVoiceSettings(s) })
         stops.push(subscribe('chat:settings-changed', applyVoiceSettings))
         stops.push(subscribe('pet:prompt', () => void openChat()))
+        stops.push(subscribe('chat:thinking', (payload) => {
+          const event = payload as { active?: boolean } | null
+          if (event?.active) {
+            speech.interrupt()
+            interaction.startThink()
+          }
+          else interaction.endThink()
+        }))
         stops.push(subscribe('chat-stream', onChatStream))
         stops.push(subscribe('pet:drag-ended', () => interaction.onPointerUp(true)))
         stops.push(subscribe('pet:motion', (payload) => interaction.handleMotion(payload)))
+        // 托盘“退出”先让她播退场，动画结束才真正退出；Core 有 8 秒超时兜底。
+        stops.push(subscribe('pet:shutdown-requested', () => {
+          speech.interrupt()
+          interaction.playShutdown(() => { void invokeCore('finish_shutdown') })
+        }))
         // 拆礼物的动画只播一遍；她说什么由紧跟着的 pet:line 决定
         stops.push(subscribe('pet:gift', (payload) => {
           const received = payload as { id?: string } | null

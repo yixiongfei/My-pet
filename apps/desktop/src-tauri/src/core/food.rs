@@ -18,6 +18,8 @@ pub struct FoodItem {
     /// Meal / Snack / Drink / Drug / Gift / Functional
     #[serde(rename = "type")]
     pub kind: String,
+    /// 前端 `/pet/` 下的 WebP，相对路径；礼物页直接用它展示缩略图
+    pub src: String,
     pub strength: f32,
     /// 回多少饱腹
     pub strength_food: f32,
@@ -104,33 +106,26 @@ impl FoodShelf {
         Some(pool[(seed as usize) % pool.len()])
     }
 
-    /// 按需求和钱包挑一样。买不起就返回 None，调用方自己决定怎么办。
+    /// 按需求和钱包随机挑一样。买不起就返回 None，调用方自己决定怎么办。
     ///
     /// `graph` 是「吃」还是「喝」，和夹心动画对应。
     /// 排掉 `Drug`——那是原版用来救存档的药，`太阳系` 一口下去体力 −100。
-    pub fn pick(&self, graph: &str, need: Need, budget: f32) -> Option<&FoodItem> {
-        self.items
+    /// `seed` 由状态机现有状态推导，既有随机变化，又不破坏 reduce 的纯函数约束。
+    pub fn pick(&self, graph: &str, need: Need, budget: f32, seed: u64) -> Option<&FoodItem> {
+        let pool: Vec<&FoodItem> = self.items
             .iter()
-            .filter(|f| f.graph == graph && f.kind != "Drug" && f.price <= budget)
-            .max_by(|a, b| {
-                score(a, need)
-                    .partial_cmp(&score(b, need))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
+            .filter(|f| f.graph == graph && f.kind != "Drug" && f.price <= budget && gain(f, need) > 0.0)
+            .collect();
+        if pool.is_empty() { None } else { Some(pool[(seed as usize) % pool.len()]) }
     }
 }
 
-/// 性价比：主要需求每花一块钱能换回多少。白送的按「不打折」算
-fn score(f: &FoodItem, need: Need) -> f32 {
-    let gain = match need {
+fn gain(f: &FoodItem, need: Need) -> f32 {
+    match need {
         Need::Hunger => f.strength_food,
         Need::Thirst => f.strength_drink,
         Need::Mood => f.feeling,
-    };
-    if gain <= 0.0 {
-        return f32::MIN;
     }
-    gain / f.price.max(1.0)
 }
 
 #[cfg(test)]
@@ -160,6 +155,7 @@ mod tests {
             let gift = shelf.random("gift", seed).unwrap();
             assert_eq!(gift.kind, "Gift");
             assert!(!gift.name.is_empty());
+            assert!(gift.src.starts_with("food/") && gift.src.ends_with(".webp"));
             assert!(shelf.get(&gift.id).is_some());
         }
     }
@@ -170,6 +166,7 @@ mod tests {
             name: id.into(),
             graph: graph.into(),
             kind: kind.into(),
+            src: format!("food/{id}.webp"),
             strength: 0.0,
             strength_food: food,
             strength_drink: drink,
@@ -215,27 +212,29 @@ mod tests {
 
     #[test]
     fn 买不起就返回空() {
-        assert!(shelf().pick("eat", Need::Hunger, 1.0).is_none());
+        assert!(shelf().pick("eat", Need::Hunger, 1.0, 0).is_none());
     }
 
     #[test]
-    fn 饿的时候挑性价比高的充饥() {
+    fn 饿的时候会在买得起的食物里随机挑() {
         let s = shelf();
-        let f = s.pick("eat", Need::Hunger, 999.0).unwrap();
-        assert_eq!(f.id, "cheap", "20 饱腹 / 5 块 比 60 / 100 划算");
+        let seen: std::collections::HashSet<_> = (0..12)
+            .map(|seed| s.pick("eat", Need::Hunger, 999.0, seed).unwrap().id.as_str())
+            .collect();
+        assert!(seen.len() >= 2, "吃东西不该永远只选同一样");
     }
 
     #[test]
     fn 心情差的时候挑能哄自己的() {
         let s = shelf();
-        let f = s.pick("eat", Need::Mood, 999.0).unwrap();
-        assert_eq!(f.id, "cake", "同样的钱，这时候该买蛋糕不是买饭");
+        let f = s.pick("eat", Need::Mood, 999.0, 2).unwrap();
+        assert!(f.feeling > 0.0);
     }
 
     #[test]
     fn 渴了只在饮料里挑() {
         let s = shelf();
-        let f = s.pick("drink", Need::Thirst, 999.0).unwrap();
+        let f = s.pick("drink", Need::Thirst, 999.0, 0).unwrap();
         assert_eq!(f.graph, "drink");
     }
 
@@ -243,7 +242,7 @@ mod tests {
     fn 永远不会去吃药() {
         let s = shelf();
         for budget in [1.0, 10.0, 999.0] {
-            let picked = s.pick("eat", Need::Hunger, budget);
+            let picked = s.pick("eat", Need::Hunger, budget, 0);
             assert!(
                 picked.is_none_or(|f| f.kind != "Drug"),
                 "挑到药了（预算 {budget}）"
@@ -255,8 +254,7 @@ mod tests {
     fn 钱包决定档次() {
         let s = shelf();
         // 只买得起便宜的
-        assert_eq!(s.pick("eat", Need::Hunger, 6.0).unwrap().id, "cheap");
-        // 有钱了也还是挑性价比，不是挑最贵
-        assert_eq!(s.pick("eat", Need::Hunger, 999.0).unwrap().id, "cheap");
+        assert_eq!(s.pick("eat", Need::Hunger, 6.0, 9).unwrap().id, "cheap");
+        assert!(s.pick("eat", Need::Hunger, 999.0, 1).is_some());
     }
 }

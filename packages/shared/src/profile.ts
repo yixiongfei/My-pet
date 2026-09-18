@@ -3,7 +3,7 @@ import { Mood } from './pet'
 
 /**
  * pet.json 里所有坐标的参考系：原版把宠物画在 500×500 的逻辑画布上
- * （vup.lps 的 touchraised sw=500 就是整幅宽度）。与 manifest.size 无关——
+ * （vup.json.profile 的 touchraised sw=500 就是整幅宽度，原值迁自 vup.lps）。与 manifest.size 无关——
  * 出高清资产时 manifest.size 变了，这个参考系不变。
  */
 export const PET_LOGICAL_SIZE = 500
@@ -20,7 +20,7 @@ export const LocateType = z.enum(['None', 'Left', 'Right', 'Top', 'Bottom'])
 export type LocateType = z.infer<typeof LocateType>
 
 /**
- * 原版 vup.lps 的一条移动规则。方向位与 GraphHelper.Move.DirectionType 一致：
+ * vup.json.profile 中的一条移动规则（迁自原版 vup.lps）。方向位与 GraphHelper.Move.DirectionType 一致：
  * Left/Right/Top/Bottom = 1/2/4/8，带 Greater 的反向边界 = 16/32/64/128。
  */
 export interface MoveRule {
@@ -70,7 +70,7 @@ const MoveJson = z.object({
   Distance: z.number().positive().default(5),
 })
 
-/** build-assets 从 vup.lps 转出的 pet.json，只声明 Body 用得到的字段 */
+/** build-assets 从 vup.json.profile 写出的 pet.json，只声明 Body 用得到的字段 */
 const PetJson = z.object({
   pet: z.object({ petname: z.string().optional() }),
   touchhead: Rect,

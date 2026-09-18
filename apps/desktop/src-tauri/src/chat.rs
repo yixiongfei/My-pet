@@ -109,6 +109,13 @@ struct StreamEvent {
     reset: bool,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThinkingEvent {
+    request_id: String,
+    active: bool,
+}
+
 #[derive(Serialize)]
 pub struct ModelStatus {
     connected: bool,
@@ -637,6 +644,7 @@ impl Drop for RequestGuard {
                 if active.as_ref().is_some_and(|a| a.id == self.id) { *active = None; }
             }
         }
+        let _ = self.app.emit("chat:thinking", ThinkingEvent { request_id: self.id.clone(), active: false });
         let _ = self.app.emit("chat-stream", StreamEvent { request_id: self.id.clone(), delta: String::new(), done: true, text: None, reset: false });
     }
 }
@@ -688,6 +696,9 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
         now.note = Some(note);
         now.fallback = fallback;
     }
+    // 从准备记忆上下文开始就算“在思考”；首个流式字到达时 Body 会收掉 think 动画，
+    // 取消 / 失败则由 RequestGuard 的 false 事件兜底。
+    let _ = app.emit("chat:thinking", ThinkingEvent { request_id: request_id.clone(), active: true });
     let memories = crate::memory_context(app.clone(), text.clone()).await;
     let prompt = wire_messages(&build_prompt(&settings, &memories, &history, &text, &now), &settings.persona.name);
     let client = chat_state(&app)?.client.clone();

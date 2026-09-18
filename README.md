@@ -9,8 +9,9 @@
 
 ```
 docs/            技术方案（01 产品定义 · 02 组件结构 · 03 Core 数值 · 04 Body 动画 · 05 Brain · 06 路线图）
-assets-src/      原版动画帧与 vup.lps —— 美术归原作者，不进仓库（见 assets-src/README.md）
-scripts/         build-assets.mjs（PNG → WebP + manifest）· start-vpet.ps1（一键启动）· setup-tts.ps1 · release.ps1
+assets-src/      原版动画帧（不入库）+ 版本化 vup.json 映射（见 assets-src/README.md）
+scripts/         convert:pet / build-assets（LPS → JSON → WebP + manifest）· start-vpet.ps1 · setup-tts.ps1 · release.ps1
+schemas/         可编辑源配置的 JSON Schema（当前是 pet-source-v1）
 packages/shared  TS/Rust 共用的 JSON 契约（zod）
 packages/brain   Agent 编排（纯 TS，无 UI）—— Phase 3 起
 apps/desktop     Tauri 2 + React：Body（前端）与 Core（src-tauri，Rust）
@@ -25,6 +26,7 @@ training/        用你点赞 / 修订过的回答做 LoRA 的脚本
 ```bash
 pnpm install
 # 把原版 VPet 的美术放进 assets-src/（结构见 assets-src/README.md）
+pnpm convert:pet       # 一次性：vup.lps + info.lps + 目录 → vup.json
 pnpm build:assets      # 首次约 3–5 分钟，生成 apps/desktop/public/pet/
 pnpm dev               # tauri dev：桌面上出现宠物
 pnpm build             # 产出 apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
@@ -37,7 +39,8 @@ pnpm check             # cargo test + 类型检查，提交前跑
 pnpm release           # 测试 → 编 release exe → 重启桌宠（scripts/release.ps1）
 ```
 
-`pnpm release -- -SkipTests` 跳过测试只编译。日常启动用 `启动桌宠.cmd`（= `scripts/start-vpet.ps1`：拉起 Ollama、TTS、桌宠，缺模型会自动下载）。
+`pnpm release -- -SkipTests` 跳过测试只编译。日常启动用 `启动桌宠.cmd`（= `scripts/start-vpet.ps1`：拉起 Ollama、TTS、桌宠，缺模型会自动下载）；
+跑一次 `scripts/make-shortcut.ps1` 会在桌面放一个「VPet 桌宠」快捷方式，双击就是同一件事（不弹黑框，失败才弹消息框）。
 每次 push 都会在 GitHub Actions 上跑同一套测试（`.github/workflows/ci.yml`）。
 
 ```bash
@@ -59,10 +62,11 @@ pnpm clean                              # 本机只留正式版：清掉 debug �
   真正空闲时她也会自己走路、爬行、爬墙或从高处落下；到屏幕边缘会按原版规则衔接方向兼容的动作，任何触摸、对话或状态变化都会立即打断移动。
   对话窗口拖到屏幕左右边缘会**吸附并自动收起**（只留一条边，鼠标碰到再滑出来）；自己发过的话悬浮可「重新发送」。
 - 作息：23 点睡到早上 8 点（`actions.toml` 的 `sleep`），到点吃饭、上班、学习、玩；电脑待机再唤醒会把这段时间补上，不会早上还赖床。工作 / 学习 / 玩的时候画面在同类动画里轮换（写文案 → 清屏 → 直播……各有驻留时长），摸她、和她说话随时打断。
+- 她出现和退出时会播入场 / 退场；等模型回复时会思考，升级、心情升降、饿了或渴了都有对应过场；真正空闲时会在两套待机姿态、小动作和自主移动之间自然轮换。玩耍表现还包括网球与两套舞蹈，这些只换画面，不偷改活动时长和数值。
 - 把她拖出屏幕松手会弹回来；拖过左右边缘则会挂在屏幕边上（原版的侧挂），鼠标碰她就探头。
 - **她会生病**：饿着、渴着、累着（低于 30）会伤健康，也拉低心情；健康掉到 50 以下就是病了——面板上健康条变黄、心情一直往下掉，她会说「我好像有点不舒服」，而且**自己养不好，得你喂药**（托盘「喂她吃药」，或面板里挑一种）。药效按分钟慢慢起作用；低于 25 她病重，什么正事都干不动、动画换成生病那套，使唤她只会说不舒服。喂药不花她的钱，病中被照顾会涨好感。
 - 她说的话浮在**头顶的气泡**里；「帮我设个番茄钟，学习一个小时」「十分钟后叫我」会在头顶挂一个**倒计时环**，到点提醒。
-- 设置里可以调**显示大小**（200–800 px）、是否**始终置顶**，写她的**名字 / 背景 / 形象 / 性格 / 说话方式**，选一件**礼物**送她。
+- 设置里可以调**显示大小**（200–800 px）、是否**始终置顶**，写她的**名字 / 背景 / 形象 / 性格 / 说话方式**。托盘点「送她礼物」会打开带图片的礼品页，由你挑一件再送；她自己吃饭或喝水时，会从买得起、能满足当前需求的同类里随机挑选。
 - 对话跑在本机 [Ollama](https://ollama.com) 上（默认 `qwen3.5:9b`，6.6 GB），不联网、不上传。为避免重复占用磁盘，启动器只维护当前配置的模型，不再随包保留第二套 4B 权重。
   `scripts/start-vpet.ps1`（或双击 `启动桌宠.cmd`）会自动拉起 `.runtime/ollama` 里的服务、补齐缺的模型并启动桌宠。
   脚本默认打开 Vulkan 核显推理（`OLLAMA_IGPU_ENABLE=1`）：在 Intel Arc 核显上 9B 的首字延迟从 4.8 s 降到 1.9 s，

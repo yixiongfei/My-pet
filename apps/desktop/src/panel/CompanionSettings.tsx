@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { IS_TAURI } from '../body/ipc'
 import { DEFAULT_CHAT_SETTINGS, errorText, invokeStrict } from '../chat/api'
 import type { ChatSettings, DesktopSettings, ModelStatus, Persona } from '../chat/api'
 import { Icon } from '../chat/Icons'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
 
-interface Gift { id: string; name: string; feeling: number; strengthFood: number; strengthDrink: number; price?: number }
+interface Gift { id: string; name: string; src: string; feeling: number; strengthFood: number; strengthDrink: number; price: number }
 type Tab = 'desktop' | 'persona' | 'voice' | 'model' | 'gifts'
 const tabs: Array<{ id: Tab; label: string; icon: 'settings' | 'spark' | 'leaf' | 'gift' | 'chat' }> = [
   { id: 'desktop', label: '桌面陪伴', icon: 'settings' }, { id: 'persona', label: '她的个性', icon: 'spark' },
@@ -13,7 +14,8 @@ const tabs: Array<{ id: Tab; label: string; icon: 'settings' | 'spark' | 'leaf' 
   { id: 'model', label: '模型与学习', icon: 'leaf' }, { id: 'gifts', label: '送份心意', icon: 'gift' },
 ]
 export function CompanionSettings() {
-  const [tab, setTab] = useState<Tab>('desktop')
+  const requested = new URLSearchParams(window.location.search).get('tab')
+  const [tab, setTab] = useState<Tab>(requested === 'gifts' ? 'gifts' : 'desktop')
   const [desktop, setDesktop] = useState<DesktopSettings>({ size: 500, alwaysOnTop: true })
   const [settings, setSettings] = useState<ChatSettings>(DEFAULT_CHAT_SETTINGS)
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null)
@@ -35,6 +37,14 @@ export function CompanionSettings() {
       if (live && failed?.status === 'rejected') setError(errorText(failed.reason))
     })
     return () => { live = false }
+  }, [])
+  useEffect(() => {
+    if (!IS_TAURI) return
+    let off: (() => void) | undefined
+    void listen<string>('panel:select-tab', event => {
+      if (tabs.some(item => item.id === event.payload)) setTab(event.payload as Tab)
+    }).then(unlisten => { off = unlisten })
+    return () => off?.()
   }, [])
   const action = async (operation: () => Promise<string>) => {
     if (busy) return
@@ -90,8 +100,13 @@ export function CompanionSettings() {
 
       {tab === 'gifts' && <>
         <div className="section-kicker">A LITTLE SOMETHING FOR HER</div><h2>送她一份小心意</h2><p className="section-description">选一份礼物，把平常的一天变得特别一点。</p>
-        <div className="gift-illustration"><Icon name="gift" size={56} /><span>FOR YOU</span></div>
-        {gifts.length ? <><label className="form-field">挑选礼物<select value={selectedGift} onChange={e => setSelectedGift(e.target.value)}>{gifts.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>{gift && <div className="gift-effects"><span>心情 +{Math.max(0, gift.feeling).toFixed(0)}</span>{gift.strengthFood > 0 && <span>饱腹 +{gift.strengthFood.toFixed(0)}</span>}{gift.strengthDrink > 0 && <span>水分 +{gift.strengthDrink.toFixed(0)}</span>}{gift.price != null && <span>价格 {gift.price}</span>}</div>}<button className="primary-button" disabled={busy || !selectedGift} onClick={() => void action(async () => { const name = await invokeStrict<string>('give_gift', { id: selectedGift }); return `送出了「${name}」，看看她的反应吧。` })}>{busy ? '正在送出…' : '送给她'}<Icon name="gift" size={17} /></button></> : <div className="empty-state"><p>{!IS_TAURI ? '打开桌宠应用后，这里会显示可赠送的礼物。' : '礼物列表还没准备好，等人物资源加载后再试一次。'}</p><button className="secondary-button" disabled={busy} onClick={() => void action(async () => { const items = await invokeStrict<Gift[]>('list_gifts'); setGifts(items); setSelectedGift(items[0]?.id ?? ''); return items.length ? '礼物列表已刷新。' : '还没有可赠送的礼物，请检查人物资源。' })}>刷新礼物</button></div>}
+        {gifts.length ? <>
+          <div className="gift-grid" role="list" aria-label="可选礼物">{gifts.map(item => <button type="button" role="listitem" key={item.id} className={`gift-card ${selectedGift === item.id ? 'selected' : ''}`} onClick={() => setSelectedGift(item.id)} aria-pressed={selectedGift === item.id}>
+            <span className="gift-card-image"><img src={`/pet/${item.src}`} alt="" /></span><strong>{item.name}</strong><small>{item.price.toFixed(0)} 金币</small>
+          </button>)}</div>
+          {gift && <div className="gift-selection"><div className="gift-selection-image"><img src={`/pet/${gift.src}`} alt={gift.name} /></div><div><span>准备送出</span><strong>{gift.name}</strong><div className="gift-effects"><span>心情 +{Math.max(0, gift.feeling).toFixed(0)}</span>{gift.strengthFood > 0 && <span>饱腹 +{gift.strengthFood.toFixed(0)}</span>}{gift.strengthDrink > 0 && <span>水分 +{gift.strengthDrink.toFixed(0)}</span>}<span>价格 {gift.price.toFixed(0)}</span></div></div></div>}
+          <button className="primary-button" disabled={busy || !selectedGift} onClick={() => void action(async () => { const name = await invokeStrict<string>('give_gift', { id: selectedGift }); return `送出了「${name}」，看看她的反应吧。` })}>{busy ? '正在送出…' : `送出${gift ? `「${gift.name}」` : '礼物'}`}<Icon name="gift" size={17} /></button>
+        </> : <div className="empty-state"><p>{!IS_TAURI ? '打开桌宠应用后，这里会显示可赠送的礼物。' : '礼物列表还没准备好，请检查食物 JSON 和人物资源。'}</p><button className="secondary-button" disabled={busy} onClick={() => void action(async () => { const items = await invokeStrict<Gift[]>('list_gifts'); setGifts(items); setSelectedGift(items[0]?.id ?? ''); return items.length ? '礼物列表已刷新。' : '还没有可赠送的礼物，请检查人物资源。' })}>刷新礼物</button></div>}
       </>}
       {notice && <div className="notice notice-success" role="status"><Icon name="check" size={16} /><span>{notice}</span></div>}
       {error && <div className="notice notice-error" role="alert"><span>{error}</span></div>}

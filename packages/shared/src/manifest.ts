@@ -70,10 +70,7 @@ export const LayeredClip = z.object({
 })
 export type LayeredClip = z.infer<typeof LayeredClip>
 
-/**
- * 食物：夹心动画中间那层的图 + Phase 2 状态机要用的营养值。
- * 原版的价格/经验/好感度是养成经济，这个产品里没有，不带过来。
- */
+/** 食物目录：food.json 的四层分类在构建时摊平，category 仍保留给 UI 使用。 */
 export const FoodItem = z.object({
   id: z.string(),
   name: z.string(),
@@ -81,6 +78,7 @@ export const FoodItem = z.object({
   graph: z.string(),
   /** Meal / Snack / Drink / Drug / Gift / Functional */
   type: z.string(),
+  category: z.enum(['gifts', 'foods', 'drinks', 'medicines']),
   src: z.string(),
   strength: z.number(),
   /** 回多少饱腹 */
@@ -89,6 +87,10 @@ export const FoodItem = z.object({
   strengthDrink: z.number(),
   feeling: z.number(),
   health: z.number(),
+  price: z.number(),
+  exp: z.number(),
+  likability: z.number(),
+  description: z.string(),
 })
 export type FoodItem = z.infer<typeof FoodItem>
 

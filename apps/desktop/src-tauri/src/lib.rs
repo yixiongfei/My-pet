@@ -13,7 +13,7 @@ mod lines;
 mod pet_motion;
 mod tts;
 
-use std::sync::{Mutex, RwLock};
+use std::sync::{atomic::{AtomicBool, Ordering}, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use core::actions::Catalog;
@@ -70,6 +70,9 @@ const PERSIST_EVERY: Duration = Duration::from_secs(60);
 /// 两拍之间隔了这么久就当时钟停过（待机 / 休眠），改按离线补算。
 /// 正常一拍一秒；系统卡一下也到不了两分钟
 const STALL_MIN: f32 = 2.0;
+/// 退场动画最长约 4.2 秒；Body / WebView 出故障时也不能让“退出”永远没反应。
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// 鼠标穿透的判定状态。
 ///
@@ -111,6 +114,37 @@ impl HitState {
 #[tauri::command]
 fn app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// 托盘退出走两阶段：先通知 Body 播 Shutdown，Body 回调 finish_shutdown 后才关进程。
+/// 另起超时兜底，避免前端没加载好或动画缺失时无法退出。
+#[tauri::command]
+fn request_shutdown(app: AppHandle) -> bool {
+    if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    if let Some(win) = app.get_webview_window(PET_WINDOW) {
+        let _ = win.show();
+    }
+    if app.emit("pet:shutdown-requested", ()).is_err() {
+        app.exit(0);
+        return true;
+    }
+    let fallback = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(SHUTDOWN_TIMEOUT);
+        if SHUTTING_DOWN.load(Ordering::SeqCst) {
+            fallback.exit(0);
+        }
+    });
+    true
+}
+
+#[tauri::command]
+fn finish_shutdown(app: AppHandle) {
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        app.exit(0);
+    }
 }
 
 /// Body 启动时拉一次当前状态，不用干等下一次 `pet:state`
@@ -1302,13 +1336,22 @@ fn save_timers(app: &AppHandle, sc: &Scheduler) {
 
 /// 打开面板窗口。已经开着就叫到前台，不重复开
 fn open_panel(app: &AppHandle) {
+    open_panel_tab(app, None);
+}
+
+/// 托盘里的“送她礼物”直接落在礼物页；窗口已经存在时用事件切页。
+fn open_panel_tab(app: &AppHandle, tab: Option<&str>) {
     if let Some(w) = app.get_webview_window(PANEL_WINDOW) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        if let Some(tab) = tab {
+            let _ = app.emit_to(PANEL_WINDOW, "panel:select-tab", tab);
+        }
         return;
     }
-    let url = tauri::WebviewUrl::App("panel.html".into());
+    let page = tab.map_or_else(|| "panel.html".to_string(), |tab| format!("panel.html?tab={tab}"));
+    let url = tauri::WebviewUrl::App(page.into());
     match tauri::WebviewWindowBuilder::new(app, PANEL_WINDOW, url)
         .title("VPet 面板")
         .inner_size(760.0, 640.0)
@@ -1362,7 +1405,7 @@ fn list_gifts(shelf: State<'_, RwLock<FoodShelf>>) -> Result<Vec<FoodItem>, Stri
     shelf.read().map(|s| s.gifts()).map_err(|_| "礼物货架正忙，请稍后再试".into())
 }
 
-/// 用户送她一样礼物。随机挑一件——拆盲盒比让人从二十项里选更有意思。
+/// 用户送她一样礼物。UI 会明确传 id；保留 None 只给调试命令作随机抽取。
 /// 礼物不花她的钱，钱是用户出的。
 #[tauri::command]
 fn give_gift(app: AppHandle, id: Option<String>) -> Result<String, String> {
@@ -1591,6 +1634,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_version,
+            request_shutdown,
+            finish_shutdown,
             get_pet_state,
             pet_touched,
             debug_patch_pet_state,
@@ -1745,13 +1790,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 if let Err(e) = open_chat_window(app) { log::warn!("打开对话窗口失败：{e}"); }
             }
             "gift" => {
-                if let Err(e) = give_gift(app.clone(), None) { log::warn!("送礼失败：{e}"); }
+                open_panel_tab(app, Some("gifts"));
             }
             "medicine" => {
                 if let Err(e) = give_medicine(app.clone(), None) { log::info!("没喂成药：{e}"); }
             }
             "passthrough" => toggle_passthrough(app),
-            "quit" => app.exit(0),
+            "quit" => { let _ = request_shutdown(app.clone()); }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

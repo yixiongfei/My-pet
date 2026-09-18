@@ -22,8 +22,15 @@ const DRAG_THRESHOLD_PX = 6
 const IDLE_ACTION_EVERY_MS: [number, number] = [15_000, 40_000]
 /** 原版每次 15 秒空闲判定约有 3/20 机会移动；这里计时更稀疏，适当提高单次命中。 */
 const MOVE_CHANCE = 0.4
+/** 没去移动时，进入原版 StateONE → StateTWO 成对待机姿态的概率。 */
+const STATE_IDLE_CHANCE = 0.35
 /** 提起后先挣扎几次再转静止（原版 rasetype 0→2，共 3 次 Raised_Dynamic） */
 const STRUGGLE_TIMES = 3
+const MOOD_RANK: Record<PetState['mood'], number> = { ill: 0, poorcondition: 1, nomal: 2, happy: 3 }
+
+type InteractionMode =
+  | 'idle' | 'touching' | 'raised' | 'talking' | 'moving' | 'move-exit' | 'side' | 'side-exit'
+  | 'startup' | 'shutdown' | 'thinking' | 'transition' | 'idle-state-one' | 'idle-state-two'
 
 export interface InteractionOpts {
   player: AnimationPlayer
@@ -48,7 +55,7 @@ export interface InteractionOpts {
  */
 export class Interaction {
   /** 交互模式，和 PetState.activity 是两回事：这个说「此刻正在干什么」 */
-  private mode: 'idle' | 'touching' | 'raised' | 'talking' | 'moving' | 'move-exit' | 'side' | 'side-exit' = 'idle'
+  private mode: InteractionMode = 'idle'
   private state: PetState = DEFAULT_PET_STATE
   private idleTimer = 0
   private pressTimer = 0
@@ -72,15 +79,18 @@ export class Interaction {
   private moveGraph: string | null = null
   /** Core 切换移动规则或用户中断时，让旧动画 / IPC 回调作废。 */
   private moveGeneration = 0
+  /** 退出动画完成后通知 Core 真正结束进程；Rust 另有超时兜底。 */
+  private shutdownDone: (() => void) | null = null
 
   constructor(private readonly o: InteractionOpts) {}
 
   /** 开始播当前活动对应的动画 + 空闲小动作循环 */
   start(): void {
-    this.o.player.onIdle = () => {
-      if (!this.disposed) this.toActivity()
-    }
-    this.toActivity()
+    this.o.player.onIdle = () => this.onAnimationIdle()
+    if (this.hasClip('startup', 'startup')) {
+      this.mode = 'startup'
+      void this.o.player.playOnce({ type: 'startup', name: 'startup', mood: this.state.mood })
+    } else this.toActivity()
   }
 
   /**
@@ -89,18 +99,42 @@ export class Interaction {
    */
   setState(s: PetState): void {
     if (this.disposed) return
+    const before = this.state
     const changed =
-      s.activity !== this.state.activity ||
-      s.mood !== this.state.mood ||
-      s.action?.id !== this.state.action?.id ||
-      s.action?.food?.id !== this.state.action?.food?.id
+      s.activity !== before.activity ||
+      s.mood !== before.mood ||
+      s.action?.id !== before.action?.id ||
+      s.action?.food?.id !== before.action?.food?.id
     this.state = s
+    if (this.mode === 'shutdown') return
     if (changed && (this.mode === 'moving' || this.mode === 'move-exit')) {
       this.cancelMove()
       this.toActivity()
       return
     }
-    if (changed && this.mode === 'idle') this.toActivity()
+    const urgentActivity = s.activity !== before.activity &&
+      (s.activity === 'eating' || s.activity === 'drinking' || s.activity === 'sleeping')
+    const ordinaryVisual = this.mode === 'thinking' || this.mode === 'transition' ||
+      this.mode === 'idle-state-one' || this.mode === 'idle-state-two'
+    if (changed && urgentActivity && ordinaryVisual) {
+      if (s.activity === 'drinking') this.playTransition('switch_thirsty', 'switch_thirsty')
+      else if (s.activity === 'eating' && s.action?.id !== 'medicine') this.playTransition('switch_hunger', 'switch_hunger')
+      else this.toActivity()
+      return
+    }
+    if (!changed || this.mode !== 'idle') return
+
+    // 生理需要的过场先于普通状态切换：她先表现「饿 / 渴」，再进入夹心吃喝动画。
+    if (s.activity !== before.activity && s.activity === 'drinking') {
+      this.playTransition('switch_thirsty', 'switch_thirsty')
+    } else if (s.activity !== before.activity && s.activity === 'eating' && s.action?.id !== 'medicine') {
+      this.playTransition('switch_hunger', 'switch_hunger')
+    } else if (s.level > before.level && before.updatedAt !== 0) {
+      this.playTransition('common', 'levelup')
+    } else if (s.activity === before.activity && s.mood !== before.mood) {
+      const type = MOOD_RANK[s.mood] > MOOD_RANK[before.mood] ? 'switch_up' : 'switch_down'
+      this.playTransition(type, type)
+    } else this.toActivity()
   }
 
   /**
@@ -113,6 +147,11 @@ export class Interaction {
     if (this.mode === 'moving' || this.mode === 'move-exit') {
       this.cancelMove()
       this.playSay()
+      return
+    }
+    if (this.mode === 'thinking') {
+      // 首句语音准备好时结束思考；C 段播完后 toActivity 会看到 speaking 并接 say。
+      this.o.player.stop()
       return
     }
     if (this.mode === 'idle') this.playSay()
@@ -129,6 +168,36 @@ export class Interaction {
     this.mode = 'talking'
     window.clearTimeout(this.idleTimer)
     void this.o.player.play({ type: 'say', name: this.nameFor('say'), mood: this.state.mood })
+  }
+
+  /** 模型收到问题、还没吐出首字时循环思考；首字或取消到来后自然播 C 段。 */
+  startThink(): void {
+    if (this.disposed || this.mode === 'shutdown' || this.mode === 'raised') return
+    if (this.mode === 'moving' || this.mode === 'move-exit') this.cancelMove()
+    if (this.mode !== 'idle' && this.mode !== 'thinking') return
+    if (!this.hasClip('common', 'think')) return
+    this.mode = 'thinking'
+    window.clearTimeout(this.idleTimer)
+    void this.o.player.play({ type: 'common', name: 'think', mood: this.state.mood })
+  }
+
+  endThink(): void {
+    if (!this.disposed && this.mode === 'thinking') this.o.player.stop()
+  }
+
+  /** 托盘退出先播退场；结束回调再让 Rust 退出，超时由 Rust 自己兜底。 */
+  playShutdown(done: () => void): void {
+    if (this.disposed) { done(); return }
+    if (this.mode === 'shutdown') return
+    this.cancelMove()
+    window.clearTimeout(this.idleTimer)
+    window.clearTimeout(this.poolTimer)
+    window.clearTimeout(this.pressTimer)
+    this.shutdownDone = done
+    this.mode = 'shutdown'
+    if (this.hasClip('shutdown', 'shutdown')) {
+      void this.o.player.playOnce({ type: 'shutdown', name: 'shutdown', mood: this.state.mood })
+    } else this.onAnimationIdle()
   }
 
   /**
@@ -180,6 +249,7 @@ export class Interaction {
 
   dispose(): void {
     this.disposed = true
+    this.shutdownDone = null
     this.sideGeneration++
     this.cancelMove()
     window.clearTimeout(this.idleTimer)
@@ -191,7 +261,7 @@ export class Interaction {
   }
 
   onPointerDown(x: number, y: number, screenX = x, screenY = y): void {
-    if (this.disposed || this.mode === 'raised') return
+    if (this.disposed || this.mode === 'raised' || this.mode === 'shutdown') return
     if (this.mode === 'side') {
       this.o.onSideExit?.()
       this.leaveSide()
@@ -264,6 +334,7 @@ export class Interaction {
 
   /** 回到当前活动对应的循环动画。话还没说完就先接 say */
   private toActivity(): void {
+    if (this.disposed || this.mode === 'shutdown') return
     if (this.moveId !== null) this.cancelMove()
     this.sideGeneration++
     this.side = null
@@ -289,6 +360,36 @@ export class Interaction {
       foodId: this.state.action?.food?.id,
     })
     this.scheduleIdleAction()
+  }
+
+  /** 一次性状态过场：播完由统一的 onIdle 回到当前 Core 活动。 */
+  private playTransition(type: GraphType, name: string): void {
+    if (!this.hasClip(type, name)) {
+      this.toActivity()
+      return
+    }
+    this.mode = 'transition'
+    window.clearTimeout(this.idleTimer)
+    window.clearTimeout(this.poolTimer)
+    void this.o.player.playOnce({ type, name, mood: this.state.mood })
+  }
+
+  /** AnimationPlayer 的唯一收尾入口；按当前 Body 模式决定下一段，不改 Core 状态。 */
+  private onAnimationIdle(): void {
+    if (this.disposed) return
+    if (this.mode === 'shutdown') {
+      const done = this.shutdownDone
+      this.shutdownDone = null
+      done?.()
+      return
+    }
+    if (this.mode === 'idle-state-one' && this.state.activity === 'idle' &&
+      Math.random() < 0.6 && this.hasClip('statetwo', 'state')) {
+      this.mode = 'idle-state-two'
+      void this.o.player.playOnce({ type: 'statetwo', name: 'state', mood: this.state.mood })
+      return
+    }
+    this.toActivity()
   }
 
   /**
@@ -360,6 +461,13 @@ export class Interaction {
         this.enterMove(event)
         return
       }
+    }
+
+    // 原版的 StateONE / StateTWO 是同一套待机姿态的两阶段变化，不属于 Core 活动。
+    if (Math.random() < STATE_IDLE_CHANCE && this.hasClip('stateone', 'state')) {
+      this.mode = 'idle-state-one'
+      void this.o.player.playOnce({ type: 'stateone', name: 'state', mood: this.state.mood })
+      return
     }
 
     const names = namesFor(this.o.manifest, 'idel', this.state.mood)

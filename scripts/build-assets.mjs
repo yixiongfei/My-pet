@@ -2,14 +2,20 @@
 /**
  * build-assets.mjs —— 把 assets-src/pet/<pet>/ 下的原版 PNG 帧动画转成前端可用的资产。
  *
+ *   assets-src/pet/vup.json            →  动画与角色配置（唯一运行时数据源）
  *   assets-src/pet/vup/**              →  apps/desktop/public/pet/<clipId>/<n>.webp
- *   assets-src/pet/vup.lps             →  apps/desktop/public/pet/pet.json
+ *   assets-src/pet/vup.lps + info.lps  →  只由 --convert-pet 一次性迁移到 vup.json
+ *   assets-src/food/*.lps              →  只由 --convert-food 一次性迁移到 food.json
+ *   vup.json.profile                   →  apps/desktop/public/pet/pet.json
  *                                          apps/desktop/public/pet/manifest.json
  *
  * 目录 → 动画信息的推断规则移植自 legacy/VPet-Simulator.Core/Handle/PetLoader.cs（LoadGraph）
  * 与 legacy/VPet-Simulator.Core/Graph/GraphInfo.cs（GraphInfo(path, info)），见 docs/04-body-animation.md §1。
  *
- * 用法：node scripts/build-assets.mjs [--pet vup] [--size 500] [--quality 85] [--force] [--dry]
+ * 用法：
+ *   node scripts/build-assets.mjs --convert-pet [--pet vup]
+ *   node scripts/build-assets.mjs --convert-food
+ *   node scripts/build-assets.mjs [--pet vup] [--size 500] [--quality 85] [--force] [--dry]
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -23,12 +29,18 @@ const SIZE = Number(args.size ?? 500)
 const QUALITY = Number(args.quality ?? 85)
 const FORCE = Boolean(args.force)
 const DRY = Boolean(args.dry)
+const CONVERT_PET = Boolean(args['convert-pet'])
+const CONVERT_FOOD = Boolean(args['convert-food'])
 
 const SRC_ROOT = path.join(ROOT, 'assets-src', 'pet')
 const PET_DIR = path.join(SRC_ROOT, PET)
 const PET_LPS = path.join(SRC_ROOT, `${PET}.lps`)
+const PET_JSON = path.join(SRC_ROOT, `${PET}.json`)
 const OUT_DIR = path.join(ROOT, 'apps', 'desktop', 'public', 'pet')
 const FOOD_DIR = path.join(ROOT, 'assets-src', 'food')
+const FOOD_JSON = path.join(FOOD_DIR, 'food.json')
+const FOOD_CATEGORIES = ['gifts', 'foods', 'drinks', 'medicines']
+const CORE_FOOD_CATALOG = path.join(ROOT, 'apps', 'desktop', 'src-tauri', 'food-catalog.json')
 /** 食物精灵在 500 的画布里最宽也就 ~65 逻辑像素，128 够 2 倍屏用了 */
 const FOOD_SIZE = 128
 
@@ -41,6 +53,13 @@ const GRAPH_TYPES = [
 ]
 const GRAPH_TYPE_TOKENS = GRAPH_TYPES.map((t) => t.split('_'))
 const MOODS = ['happy', 'nomal', 'poorcondition', 'ill']
+/** 与 packages/shared/src/pet.ts 一致；夹心动画的前后层也要按心情降级查找。 */
+const MOOD_FALLBACK = {
+  happy: ['happy', 'nomal', 'poorcondition', 'ill'],
+  nomal: ['nomal', 'happy', 'poorcondition', 'ill'],
+  poorcondition: ['poorcondition', 'nomal', 'ill', 'happy'],
+  ill: ['ill', 'poorcondition', 'nomal', 'happy'],
+}
 const ANIMATS = { single: 'single', a_start: 'start', b_loop: 'loop', c_end: 'end' }
 const GRAPH_LOADERS = new Set(['pnganimation', 'apnganimation', 'picture', 'foodanimation'])
 
@@ -53,11 +72,24 @@ async function main() {
   const t0 = Date.now()
   await assertDir(PET_DIR, `找不到宠物资产目录 ${PET_DIR}`)
 
-  // 1. 扫描：目录 → 原始 clip 列表
-  const raw = []
-  await loadGraphDir(PET_DIR, PET_DIR, raw)
+  // LPS 只在迁移命令中读取；正常构建只认显式的 JSON 映射。
+  if (CONVERT_PET) {
+    await convertPetSource()
+    return
+  }
+  if (CONVERT_FOOD) {
+    await convertFoodSource()
+    return
+  }
+
+  // 1. JSON 映射 → 原始 clip 列表
+  if (!(await exists(PET_JSON))) {
+    throw new Error(`找不到 ${PET_JSON}\n先运行 pnpm convert:pet，把 vup.lps / info.lps 迁移为 JSON。`)
+  }
+  const petSource = await readPetSource()
+  const raw = await hydratePetSource(petSource)
   const frameCount = raw.reduce((n, c) => n + (c.files?.length ?? 0), 0)
-  console.log(`扫描完成：${raw.filter((c) => !c._layered).length} 段动画，${frameCount} 帧，${raw.filter((c) => c._layered).length} 段夹心`)
+  console.log(`读取 ${path.relative(ROOT, PET_JSON)}：${raw.filter((c) => !c._layered).length} 段动画，${frameCount} 帧，${raw.filter((c) => c._layered).length} 段夹心`)
 
   // 2. 分组成变体，生成 clip id
   const layeredRaw = raw.filter((c) => c._layered)
@@ -147,7 +179,15 @@ async function main() {
   // 3.5 夹心动画：把 info.lps 里写的层名解析成 clip id
   const layered = []
   for (const l of layeredRaw.sort((a, b) => a.source.localeCompare(b.source))) {
-    const pick = (name) => index[`${l.type}/${name}/${l.mood}/${l.animat}`]?.[0]
+    // 原版 Drink 的 Happy / PoorCondition 复用 Nomal 的手部前层；LPS 只声明层名，
+    // 没有为每种心情重复登记。和 Body 普通动画一样按 MOOD_FALLBACK 找最近可用层。
+    const pick = (name) => {
+      for (const mood of MOOD_FALLBACK[l.mood]) {
+        const id = index[`${l.type}/${name}/${mood}/${l.animat}`]?.[0]
+        if (id) return id
+      }
+      return undefined
+    }
     const back = pick(l.backName)
     const front = pick(l.frontName)
     if (!back || !front) {
@@ -165,11 +205,8 @@ async function main() {
   // 3.6 食物：夹心动画中间那层的图
   const food = await buildFood()
 
-  // 4. pet.json（vup.lps）
-  const petJson = await fs
-    .readFile(PET_LPS, 'utf8')
-    .then((txt) => lpsToJson(parseLps(txt)))
-    .catch(() => null)
+  // 4. pet.json（源数据已经由 vup.lps 迁移进 vup.json.profile）
+  const petJson = petSource.profile
 
   // 5. manifest.json
   const manifest = {
@@ -184,6 +221,8 @@ async function main() {
   if (!DRY) {
     await fs.writeFile(path.join(OUT_DIR, 'manifest.json'), JSON.stringify(manifest))
     if (petJson) await fs.writeFile(path.join(OUT_DIR, 'pet.json'), JSON.stringify(petJson, null, 2))
+    // Core 在 WebView 加载前就要能送礼 / 喂药，因此同一份 JSON 同步嵌进 Rust。
+    await fs.writeFile(CORE_FOOD_CATALOG, `${JSON.stringify(food, null, 2)}\n`, 'utf8')
   }
 
   // 6. 统计
@@ -193,6 +232,158 @@ async function main() {
   for (const [t, n] of Object.entries(byType).sort((a, b) => b[1] - a[1])) console.log(`  ${t.padEnd(22)} ${n}`)
   console.log(`\nmanifest：${clips.length} clips · ${Object.keys(index).length} 键 · ${layered.length} 段夹心 · 用时 ${((Date.now() - t0) / 1000).toFixed(1)}s`)
   if (!DRY) console.log(`输出：${OUT_DIR}`)
+}
+
+/* ------------------------------------------------------------------ *
+ * 宠物源配置：LPS 只负责一次迁移，日常构建只读取 JSON
+ * ------------------------------------------------------------------ */
+async function convertPetSource() {
+  if (!(await exists(PET_LPS))) throw new Error(`找不到迁移源 ${PET_LPS}`)
+
+  const raw = []
+  await loadGraphDir(PET_DIR, PET_DIR, raw)
+  const profile = lpsToJson(parseLps(await fs.readFile(PET_LPS, 'utf8')))
+  const source = {
+    $schema: '../../schemas/pet-source-v1.schema.json',
+    schemaVersion: 1,
+    pet: PET,
+    generatedFrom: [`${PET}.lps`, `${PET}/**/info.lps`],
+    profile,
+    animations: raw
+      .filter((entry) => !entry._layered)
+      .map((entry) => ({
+        source: sourcePath(entry.dir),
+        type: entry.type,
+        name: entry.name,
+        mood: entry.mood,
+        segment: entry.animat,
+        ...(entry.layer ? { layer: entry.layer } : {}),
+        frames: entry.files.map((frame) => ({
+          file: path.basename(frame.path),
+          ms: frame.ms,
+        })),
+      }))
+      .sort(compareSourceEntry),
+    layered: raw
+      .filter((entry) => entry._layered)
+      .map((entry) => ({
+        source: entry.source.replaceAll('\\', '/'),
+        type: entry.type,
+        name: entry.name,
+        mood: entry.mood,
+        segment: entry.animat,
+        layers: { back: entry.backName, front: entry.frontName },
+        food: entry.food,
+      }))
+      .sort(compareSourceEntry),
+  }
+
+  validatePetSource(source)
+  await fs.writeFile(PET_JSON, `${JSON.stringify(source, null, 2)}\n`, 'utf8')
+  const frames = source.animations.reduce((count, entry) => count + entry.frames.length, 0)
+  console.log(`已生成 ${path.relative(ROOT, PET_JSON)}`)
+  console.log(`  ${source.animations.length} 段动画 · ${frames} 帧 · ${source.layered.length} 段夹心动画`)
+  console.log('  正常构建从现在起只读取这份 JSON；原 LPS 保留作迁移依据。')
+}
+
+async function readPetSource() {
+  let source
+  try {
+    source = JSON.parse(await fs.readFile(PET_JSON, 'utf8'))
+  } catch (error) {
+    throw new Error(`${PET_JSON} 不是有效 JSON：${error.message}`)
+  }
+  validatePetSource(source)
+  return source
+}
+
+function validatePetSource(source) {
+  if (!source || source.schemaVersion !== 1 || source.pet !== PET) {
+    throw new Error(`${PET_JSON} 的 schemaVersion / pet 不匹配`)
+  }
+  if (!source.profile || !Array.isArray(source.animations) || !Array.isArray(source.layered)) {
+    throw new Error(`${PET_JSON} 缺少 profile / animations / layered`)
+  }
+
+  const validType = new Set(GRAPH_TYPES)
+  const validMood = new Set(MOODS)
+  const validSegment = new Set(Object.values(ANIMATS))
+  for (const entry of [...source.animations, ...source.layered]) {
+    if (!isSafeRelativePath(entry.source)) throw new Error(`非法动画 source：${entry.source}`)
+    if (!validType.has(entry.type)) throw new Error(`未知动画 type：${entry.type}`)
+    if (!validMood.has(entry.mood)) throw new Error(`未知动画 mood：${entry.mood}`)
+    if (!validSegment.has(entry.segment)) throw new Error(`未知动画 segment：${entry.segment}`)
+    if (typeof entry.name !== 'string' || !entry.name) throw new Error(`动画缺少 name：${entry.source}`)
+  }
+  for (const entry of source.animations) {
+    if (!Array.isArray(entry.frames) || entry.frames.length === 0) throw new Error(`动画没有 frames：${entry.source}`)
+    for (const frame of entry.frames) {
+      if (!isSafeFileName(frame.file) || !Number.isFinite(frame.ms) || frame.ms <= 0) {
+        throw new Error(`非法动画帧：${entry.source}/${frame.file}`)
+      }
+    }
+  }
+  for (const entry of source.layered) {
+    if (!entry.layers?.back || !entry.layers?.front || !Array.isArray(entry.food)) {
+      throw new Error(`夹心动画缺少 layers / food：${entry.source}`)
+    }
+  }
+}
+
+async function hydratePetSource(source) {
+  const out = []
+  for (const entry of source.animations) {
+    const dir = path.join(PET_DIR, ...entry.source.split('/'))
+    const files = entry.frames.map((frame) => ({
+      path: path.join(dir, frame.file),
+      ms: frame.ms,
+    }))
+    const missing = []
+    for (const frame of files) if (!(await exists(frame.path))) missing.push(path.basename(frame.path))
+    if (missing.length) throw new Error(`动画 ${entry.source} 缺少帧：${missing.slice(0, 5).join(', ')}`)
+    out.push({
+      type: entry.type,
+      name: entry.name,
+      mood: entry.mood,
+      animat: entry.segment,
+      ...(entry.layer ? { layer: entry.layer } : {}),
+      dir,
+      source: entry.source,
+      files,
+    })
+  }
+  for (const entry of source.layered) {
+    out.push({
+      type: entry.type,
+      name: entry.name,
+      mood: entry.mood,
+      animat: entry.segment,
+      _layered: true,
+      dir: path.join(PET_DIR, ...entry.source.split('/')),
+      backName: entry.layers.back,
+      frontName: entry.layers.front,
+      food: entry.food,
+      source: entry.source,
+    })
+  }
+  return out
+}
+
+function sourcePath(dir) {
+  return path.relative(PET_DIR, dir).replaceAll('\\', '/')
+}
+
+function compareSourceEntry(a, b) {
+  return `${a.source}\0${a.type}\0${a.name}\0${a.mood}\0${a.segment}`
+    .localeCompare(`${b.source}\0${b.type}\0${b.name}\0${b.mood}\0${b.segment}`)
+}
+
+function isSafeRelativePath(value) {
+  return typeof value === 'string' && value !== '' && !path.isAbsolute(value) && !value.split(/[\\/]/).includes('..')
+}
+
+function isSafeFileName(value) {
+  return typeof value === 'string' && value !== '' && path.basename(value) === value && /\.png$/i.test(value)
 }
 
 /* ------------------------------------------------------------------ *
@@ -259,63 +450,128 @@ async function addClipFromFiles(dir, files, startup, line, out, isFile) {
   })
 }
 
-/**
- * 食物：夹心动画中间那层。
- *
- * `assets-src/food/*.lps` 是原版的食物定义（名字 / 类型 / 用哪段动画 / 营养），
- * 图片按名字对应 `assets-src/food/image/<名字>.png`。
- * 留下 Body 和状态机用得到的字段，含价格与经验——她自己工作挣钱、自己按心情买东西，
- * 所以经济这部分是要的。只丢掉好感度（那属于原版的养成线）。
- */
+/** JSON 食物目录 → 夹心动画中间层；正常构建不再读取 `.lps`。 */
 async function buildFood() {
-  const lpsFiles = await fs.readdir(FOOD_DIR).catch(() => [])
-  const items = []
-  for (const f of lpsFiles.filter((f) => f.endsWith('.lps')).sort()) {
-    for (const line of parseLps(await fs.readFile(path.join(FOOD_DIR, f), 'utf8'))) {
-      if (line.name !== 'food') continue
-      const name = line.subs.name
-      const graph = (line.subs.graph ?? '').toLowerCase()
-      if (!name || !graph) continue
-      items.push({
-        name,
-        graph, // eat / drink / gift —— 决定用哪段夹心动画
-        type: line.subs.type ?? '',
-        strength: num(line.subs.Strength),
-        strengthFood: num(line.subs.StrengthFood),
-        strengthDrink: num(line.subs.StrengthDrink),
-        feeling: num(line.subs.Feeling),
-        health: num(line.subs.Health),
-        // 她自己挣钱自己买，所以价格是要的（一开始误判成「养成经济，不带过来」）
-        price: num(line.subs.price),
-        exp: num(line.subs.Exp),
-        _src: path.join(FOOD_DIR, 'image', `${name}.png`),
-      })
-    }
-  }
-
+  const source = await readFoodSource()
+  const items = FOOD_CATEGORIES.flatMap((category) => source.categories[category])
+    .sort((a, b) => a.id.localeCompare(b.id))
   const out = []
   const outDir = path.join(OUT_DIR, 'food')
   if (!DRY) await fs.mkdir(outDir, { recursive: true })
   const sharp = DRY ? null : (await import('sharp')).default
   let missing = 0
-  for (const [i, it] of items.entries()) {
-    if (!(await exists(it._src))) { missing++; continue }
-    const id = String(i).padStart(3, '0')
+  for (const it of items) {
+    const original = path.join(FOOD_DIR, it.image)
+    if (!(await exists(original))) { missing++; continue }
+    const id = it.id
     const src = `food/${id}.webp`
     if (!DRY) {
       const dst = path.join(OUT_DIR, src)
       if (FORCE || !(await exists(dst))) {
-        await sharp(it._src)
+        await sharp(original)
           .resize(FOOD_SIZE, FOOD_SIZE, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: QUALITY })
           .toFile(dst)
       }
     }
-    const { _src, ...rest } = it
+    const { image, source: _source, ...rest } = it
     out.push({ id, src, ...rest })
   }
   console.log(`食物：${out.length} 项${missing ? `（${missing} 项缺图，已跳过）` : ''}`)
   return out
+}
+
+/**
+ * 原版五份 LPS 只迁移一次。分类层负责 UI 与后续维护：Gift / Drug 优先，
+ * 其余再按夹心动画分成饮料和食物；Functional 因此不会被误塞进单独的“其他”。
+ */
+async function convertFoodSource() {
+  const lpsFiles = (await fs.readdir(FOOD_DIR).catch(() => []))
+    .filter((file) => file.toLowerCase().endsWith('.lps')).sort()
+  if (!lpsFiles.length) throw new Error(`找不到迁移源 ${FOOD_DIR}/*.lps`)
+  const categories = Object.fromEntries(FOOD_CATEGORIES.map((name) => [name, []]))
+  const names = new Set()
+  let index = 0
+  for (const file of lpsFiles) {
+    for (const line of parseLps(await fs.readFile(path.join(FOOD_DIR, file), 'utf8'))) {
+      if (line.name !== 'food') continue
+      const name = line.subs.name
+      const graph = (line.subs.graph ?? '').toLowerCase()
+      const type = line.subs.type ?? ''
+      if (!name || !graph) continue
+      if (names.has(name)) throw new Error(`食物名重复：${name}`)
+      names.add(name)
+      const category = type === 'Gift' || graph === 'gift'
+        ? 'gifts'
+        : type === 'Drug'
+          ? 'medicines'
+          : graph === 'drink' ? 'drinks' : 'foods'
+      categories[category].push({
+        id: String(index++).padStart(3, '0'),
+        name,
+        category,
+        graph,
+        type,
+        image: `image/${name}.png`,
+        strength: num(line.subs.Strength),
+        strengthFood: num(line.subs.StrengthFood),
+        strengthDrink: num(line.subs.StrengthDrink),
+        feeling: num(line.subs.Feeling),
+        health: num(line.subs.Health),
+        price: num(line.subs.price),
+        exp: num(line.subs.Exp),
+        likability: num(line.subs.Likability),
+        description: line.subs.desc ?? '',
+        source: file,
+      })
+    }
+  }
+  const source = {
+    $schema: '../../schemas/food-source-v1.schema.json',
+    schemaVersion: 1,
+    generatedFrom: lpsFiles,
+    categories,
+  }
+  validateFoodSource(source)
+  await fs.writeFile(FOOD_JSON, `${JSON.stringify(source, null, 2)}\n`, 'utf8')
+  console.log(`已生成 ${path.relative(ROOT, FOOD_JSON)}`)
+  console.log(FOOD_CATEGORIES.map((category) => `${category} ${categories[category].length}`).join(' · '))
+  console.log('正常构建从现在起只读取 food.json；原 LPS 保留作迁移依据。')
+}
+
+async function readFoodSource() {
+  if (!(await exists(FOOD_JSON))) {
+    throw new Error(`找不到 ${FOOD_JSON}\n先运行 pnpm convert:food，把 food/*.lps 迁移为 JSON。`)
+  }
+  let source
+  try {
+    source = JSON.parse(await fs.readFile(FOOD_JSON, 'utf8'))
+  } catch (error) {
+    throw new Error(`${FOOD_JSON} 不是有效 JSON：${error.message}`)
+  }
+  validateFoodSource(source)
+  return source
+}
+
+function validateFoodSource(source) {
+  if (!source || source.schemaVersion !== 1 || !source.categories) {
+    throw new Error(`${FOOD_JSON} 的 schemaVersion / categories 不匹配`)
+  }
+  const ids = new Set()
+  const names = new Set()
+  for (const category of FOOD_CATEGORIES) {
+    if (!Array.isArray(source.categories[category])) throw new Error(`${FOOD_JSON} 缺少分类 ${category}`)
+    for (const item of source.categories[category]) {
+      if (!item?.id || !item.name || !item.graph || !item.image || item.category !== category) {
+        throw new Error(`${FOOD_JSON} 的 ${category} 中有无效项目`)
+      }
+      if (ids.has(item.id) || names.has(item.name)) {
+        throw new Error(`${FOOD_JSON} 有重复 id / name：${item.id} ${item.name}`)
+      }
+      ids.add(item.id)
+      names.add(item.name)
+    }
+  }
 }
 
 const num = (v) => (v === undefined ? 0 : Number.parseFloat(v) || 0)

@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pet-source-v1.schema.json",
+  "title": "VPet character source",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "pet", "profile", "animations", "layered"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "pet": { "type": "string", "minLength": 1 },
+    "generatedFrom": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "profile": { "type": "object" },
+    "animations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/animation" }
+    },
+    "layered": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/layered" }
+    }
+  },
+  "$defs": {
+    "graphType": {
+      "enum": [
+        "common", "raised_dynamic", "raised_static", "move", "default", "touch_head",
+        "touch_body", "idel", "sleep", "say", "stateone", "statetwo", "startup",
+        "shutdown", "work", "switch_up", "switch_down", "switch_thirsty",
+        "switch_hunger", "sidehide_left_main", "sidehide_left_rise",
+        "sidehide_right_main", "sidehide_right_rise"
+      ]
+    },
+    "mood": { "enum": ["happy", "nomal", "poorcondition", "ill"] },
+    "segment": { "enum": ["single", "start", "loop", "end"] },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+"
+    },
+    "base": {
+      "type": "object",
+      "required": ["source", "type", "name", "mood", "segment"],
+      "properties": {
+        "source": { "$ref": "#/$defs/source" },
+        "type": { "$ref": "#/$defs/graphType" },
+        "name": { "type": "string", "minLength": 1 },
+        "mood": { "$ref": "#/$defs/mood" },
+        "segment": { "$ref": "#/$defs/segment" }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "ms"],
+      "properties": {
+        "file": { "type": "string", "pattern": "^[^/\\\\]+\\.png$" },
+        "ms": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "animation": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "type", "name", "mood", "segment", "frames"],
+          "properties": {
+            "source": { "$ref": "#/$defs/source" },
+            "type": { "$ref": "#/$defs/graphType" },
+            "name": { "type": "string", "minLength": 1 },
+            "mood": { "$ref": "#/$defs/mood" },
+            "segment": { "$ref": "#/$defs/segment" },
+            "layer": { "enum": ["back", "front"] },
+            "frames": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/frame" }
+            }
+          }
+        }
+      ]
+    },
+    "foodFrame": {
+      "type": "object",
+      "required": ["ms", "visible"],
+      "properties": {
+        "ms": { "type": "number", "exclusiveMinimum": 0 },
+        "visible": { "type": "boolean" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number" },
+        "rotate": { "type": "number" },
+        "opacity": { "type": "number" }
+      }
+    },
+    "layered": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "type", "name", "mood", "segment", "layers", "food"],
+          "properties": {
+            "source": { "$ref": "#/$defs/source" },
+            "type": { "$ref": "#/$defs/graphType" },
+            "name": { "type": "string", "minLength": 1 },
+            "mood": { "$ref": "#/$defs/mood" },
+            "segment": { "$ref": "#/$defs/segment" },
+            "layers": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["back", "front"],
+              "properties": {
+                "back": { "type": "string", "minLength": 1 },
+                "front": { "type": "string", "minLength": 1 }
+              }
+            },
+            "food": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/foodFrame" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

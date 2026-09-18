@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/yixiongfei/My-pet/schemas/food-source-v1.schema.json",
+  "title": "VPet food source v1",
+  "type": "object",
+  "required": ["schemaVersion", "generatedFrom", "categories"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "generatedFrom": { "type": "array", "items": { "type": "string" } },
+    "categories": {
+      "type": "object",
+      "required": ["gifts", "foods", "drinks", "medicines"],
+      "properties": {
+        "gifts": { "$ref": "#/$defs/items" },
+        "foods": { "$ref": "#/$defs/items" },
+        "drinks": { "$ref": "#/$defs/items" },
+        "medicines": { "$ref": "#/$defs/items" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item" }
+    },
+    "item": {
+      "type": "object",
+      "required": [
+        "id", "name", "category", "graph", "type", "image", "strength",
+        "strengthFood", "strengthDrink", "feeling", "health", "price", "exp",
+        "likability", "description", "source"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9]{3}$" },
+        "name": { "type": "string", "minLength": 1 },
+        "category": { "enum": ["gifts", "foods", "drinks", "medicines"] },
+        "graph": { "enum": ["eat", "drink", "gift"] },
+        "type": { "type": "string", "minLength": 1 },
+        "image": { "type": "string", "minLength": 1 },
+        "strength": { "type": "number" },
+        "strengthFood": { "type": "number" },
+        "strengthDrink": { "type": "number" },
+        "feeling": { "type": "number" },
+        "health": { "type": "number" },
+        "price": { "type": "number" },
+        "exp": { "type": "number" },
+        "likability": { "type": "number" },
+        "description": { "type": "string" },
+        "source": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

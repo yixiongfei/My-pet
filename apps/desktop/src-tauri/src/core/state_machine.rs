@@ -951,12 +951,20 @@ fn buy(shelf: &FoodShelf, a: &ActionDef, s: &mut PetState) -> Option<FoodRef> {
     } else {
         Need::Hunger
     };
-    let item = shelf.pick(graph, need, s.money)?;
+    // 只从符合当前需求且买得起的同类里随机；种子完全来自状态，reduce 仍可复现。
+    let seed = s.updated_at as u64 ^ u64::from(s.money.to_bits()) ^ stable_hash(&a.id);
+    let item = shelf.pick(graph, need, s.money, seed)?;
     s.money = (s.money - item.price).max(0.0);
     s.strength = (s.strength + item.strength).clamp(0.0, 100.0);
     Some(FoodRef {
         id: item.id.clone(),
         name: item.name.clone(),
+    })
+}
+
+fn stable_hash(text: &str) -> u64 {
+    text.bytes().fold(0xcbf29ce484222325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
     })
 }
 
@@ -1031,6 +1039,7 @@ mod tests {
             name: id.into(),
             graph: graph.into(),
             kind: kind.into(),
+            src: format!("food/{id}.webp"),
             strength: 0.0,
             strength_food: food,
             strength_drink: drink,
@@ -1396,7 +1405,7 @@ mod tests {
         let p = reduce(&c, &stocked(), &p, &Event::Tick { minutes: 1.0, hour: 12.0 });
         let a = p.state.action.as_ref().unwrap();
         let f = a.food.as_ref().expect("吃饭得先买一样东西");
-        assert_eq!(f.id, "bun", "饿的时候该买管饱的");
+        assert!(["bun", "cake"].contains(&f.id.as_str()), "只该从食物池里挑，实际 {}", f.id);
         assert!(p.state.money < 100.0, "买了东西却没花钱");
     }
 
@@ -1409,14 +1418,14 @@ mod tests {
         p.state.feeling = 5.0; // 又饿又难受
         let p = reduce(&c, &stocked(), &p, &Event::Tick { minutes: 1.0, hour: 12.0 });
         let f = p.state.action.as_ref().unwrap().food.as_ref().unwrap();
-        assert_eq!(f.id, "cake", "心情差就该买点好的哄自己，而不是啃馒头");
+        assert!(["bun", "cake"].contains(&f.id.as_str()), "心情需求也只能从正收益食物里挑");
     }
 
     #[test]
     fn 买的东西真的回饱腹() {
         let c = cat();
         let mut p = Pet::default();
-        p.state.money = 100.0;
+        p.state.money = 15.0; // 只买得起馒头，隔离随机选择，只验营养结算
         p.state.hunger = 5.0;
         // 吃饭 duration=2，馒头回 40 → 两分钟吃完该到 45 上下
         let p = run_with(&c, &stocked(), p, 2, 12.0);
@@ -1461,6 +1470,7 @@ mod tests {
                 name: "APhone X".into(),
                 graph: "gift".into(),
                 kind: "Gift".into(),
+                src: "food/phone.webp".into(),
                 strength: 0.0,
                 strength_food: 0.0,
                 strength_drink: 0.0,
@@ -2132,6 +2142,7 @@ mod tests {
             name: "pill".into(),
             graph: "eat".into(),
             kind: "Drug".into(),
+            src: "food/pill.webp".into(),
             strength: 20.0,
             strength_food: 0.0,
             strength_drink: 0.0,

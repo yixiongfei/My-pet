@@ -5,7 +5,7 @@ import type { Activity, GraphType } from '@vpet/shared'
  *
  *   Work  → 写文案 8–15 min · 清屏 5–10 · 直播 10–20 · 烧烤 6–12 · 修屏幕 6–12
  *   Study → 看书 · 写字 · 研究 · 画画
- *   Play  → 打游戏 · 删错误 · 跳绳 · 玩水
+ *   Play  → 打游戏 · 删错误 · 跳绳 · 玩水 · 打网球 · 两套舞蹈
  *
  * Core 的活动（Work/Study/…）、时长和数值一概不变；这里只管画面：驻留期没到不因为
  * 轮换而换动画，到了就在同一池里随机换一个不同的。用户交互、生理急需、活动自然结束
@@ -19,6 +19,7 @@ export interface PoolEntry {
 }
 
 const work = (name: string, minMin: number, maxMin: number): PoolEntry => ({ type: 'work', name, minMin, maxMin })
+const common = (name: string, minMin: number, maxMin: number): PoolEntry => ({ type: 'common', name, minMin, maxMin })
 
 export const ANIMATION_POOLS: Partial<Record<Activity, PoolEntry[]>> = {
   working: [
@@ -39,6 +40,9 @@ export const ANIMATION_POOLS: Partial<Record<Activity, PoolEntry[]>> = {
     work('removeobject', 5, 10),   // 删错误
     work('ropeskipping', 3, 6),    // 跳绳
     work('playwater', 5, 10),      // 玩水
+    common('tennis', 4, 8),        // 打网球（原 Relax 资源）
+    common('music', 4, 8),         // 舞蹈 1
+    common('music2', 4, 8),        // 舞蹈 2
   ],
 }
 

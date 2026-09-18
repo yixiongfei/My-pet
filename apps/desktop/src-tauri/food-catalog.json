@@ -3,6 +3,7 @@
     "id": "000",
     "src": "food/000.webp",
     "name": "太阳系",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": -100,
@@ -11,12 +12,15 @@
     "feeling": 0,
     "health": 50,
     "price": 0,
-    "exp": -180
+    "exp": -180,
+    "likability": -4,
+    "description": "没钱也能吃,可以用来拯救存档(生病), 没事别吃这个"
   },
   {
     "id": "001",
     "src": "food/001.webp",
     "name": "维生素C含片",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 0,
@@ -25,12 +29,15 @@
     "feeling": 0,
     "health": 10,
     "price": 16.5,
-    "exp": 40
+    "exp": 40,
+    "likability": 0,
+    "description": "本产品为保健品不能代替药品"
   },
   {
     "id": "002",
     "src": "food/002.webp",
     "name": "钙片",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 20,
@@ -39,12 +46,15 @@
     "feeling": 0,
     "health": 10,
     "price": 24.5,
-    "exp": 80
+    "exp": 80,
+    "likability": 0,
+    "description": "郑重声明，本产品与同名影视产品没有一点关系。"
   },
   {
     "id": "003",
     "src": "food/003.webp",
     "name": "脑黑金",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 20,
@@ -53,12 +63,15 @@
     "feeling": -25,
     "health": 15,
     "price": 94.5,
-    "exp": 480
+    "exp": 480,
+    "likability": 0,
+    "description": "过年过节不收礼！__________！(3分)"
   },
   {
     "id": "004",
     "src": "food/004.webp",
     "name": "666感冒灵颗粒",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 0,
@@ -67,12 +80,15 @@
     "feeling": 0,
     "health": 20,
     "price": 46.5,
-    "exp": 160
+    "exp": 160,
+    "likability": 0,
+    "description": "老牌子，值得信任，有妈妈的味道。"
   },
   {
     "id": "005",
     "src": "food/005.webp",
     "name": "健胃整肠丸",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 20,
@@ -81,12 +97,15 @@
     "feeling": 0,
     "health": 25,
     "price": 57,
-    "exp": 184
+    "exp": 184,
+    "likability": 0,
+    "description": "这是什么？肚子疼？来两粒。这是什么？拉肚子？来两粒"
   },
   {
     "id": "006",
     "src": "food/006.webp",
     "name": "布洛芬缓释胶囊",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 20,
@@ -95,12 +114,15 @@
     "feeling": 0,
     "health": 35,
     "price": 116,
-    "exp": 480
+    "exp": 480,
+    "likability": 0,
+    "description": "在以前的大瘟疫时代，曾经作为货币使用，最高的时候价值连城"
   },
   {
     "id": "007",
     "src": "food/007.webp",
     "name": "速效救心丸",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 0,
@@ -109,12 +131,15 @@
     "feeling": 0,
     "health": 75,
     "price": 181.5,
-    "exp": 640
+    "exp": 640,
+    "likability": 0,
+    "description": "急急急，等下有得你急的。"
   },
   {
     "id": "008",
     "src": "food/008.webp",
     "name": "大力丸",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 20,
@@ -123,12 +148,15 @@
     "feeling": 50,
     "health": 50,
     "price": 94,
-    "exp": 240
+    "exp": 240,
+    "likability": 0,
+    "description": "加入千年老山参，野生蜂王浆，人形何首乌，极品燕窝，九天贡胶，御用藏红花，天山雪莲，七彩灵芝，古墓牛黄，深海龙涎香，全部融于一炉。不止这些，更加入1米长的虫草，5米长的象拔蚌，剑齿虎骨，爱新觉罗紫河车，火星朝露水，黑玉断续膏，女娲的唾液，亚当的肋骨！"
   },
   {
     "id": "009",
     "src": "food/009.webp",
     "name": "阿司匹林",
+    "category": "medicines",
     "graph": "eat",
     "type": "Drug",
     "strength": 0,
@@ -137,12 +165,15 @@
     "feeling": 0,
     "health": 65,
     "price": 131.5,
-    "exp": 400
+    "exp": 400,
+    "likability": 0,
+    "description": "发烧去医院经常见的药，从小到大都不懂为什么长得和螺丝头一样"
   },
   {
     "id": "010",
     "src": "food/010.webp",
     "name": "ab钙奶",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -151,12 +182,15 @@
     "feeling": 2,
     "health": 1,
     "price": 7.5,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "健康美味，经济实惠"
   },
   {
     "id": "011",
     "src": "food/011.webp",
     "name": "果汁",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -165,12 +199,15 @@
     "feeling": 7,
     "health": 3,
     "price": 10.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "那个那个那个那个果汁分你一半"
   },
   {
     "id": "012",
     "src": "food/012.webp",
     "name": "可乐",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -179,12 +216,15 @@
     "feeling": 50,
     "health": -1,
     "price": 9,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "蓝色那个在日用品区谢谢"
   },
   {
     "id": "013",
     "src": "food/013.webp",
     "name": "凉茶",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -193,12 +233,15 @@
     "feeling": 12,
     "health": 5,
     "price": 16.5,
-    "exp": 20
+    "exp": 20,
+    "likability": 0,
+    "description": "怕上火，喝广东咖啡！"
   },
   {
     "id": "014",
     "src": "food/014.webp",
     "name": "维他奶",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 15,
@@ -207,12 +250,15 @@
     "feeling": 2,
     "health": 1,
     "price": 8,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "点止汽水咁简单"
   },
   {
     "id": "015",
     "src": "food/015.webp",
     "name": "雷碧",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 5,
@@ -221,12 +267,15 @@
     "feeling": 37,
     "health": -1,
     "price": 7,
-    "exp": 2
+    "exp": 2,
+    "likability": 0,
+    "description": "透心扬，心飞凉"
   },
   {
     "id": "016",
     "src": "food/016.webp",
     "name": "盐汽水",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 15,
@@ -235,12 +284,15 @@
     "feeling": 37,
     "health": -0.5,
     "price": 8.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "我一口盐汽水！"
   },
   {
     "id": "017",
     "src": "food/017.webp",
     "name": "椰汁",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 15,
@@ -249,12 +301,15 @@
     "feeling": 25,
     "health": 2,
     "price": 11.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "白白胖胖，曲线圆润，要喝不加香油的椰O牌椰汁"
   },
   {
     "id": "018",
     "src": "food/018.webp",
     "name": "咖啡饮料",
+    "category": "drinks",
     "graph": "drink",
     "type": "Functional",
     "strength": 80,
@@ -263,12 +318,15 @@
     "feeling": 0,
     "health": -1,
     "price": 12,
-    "exp": 32
+    "exp": 32,
+    "likability": 0,
+    "description": "不小心倒在键盘上效果更好哦！"
   },
   {
     "id": "019",
     "src": "food/019.webp",
     "name": "大鹏特饮",
+    "category": "drinks",
     "graph": "drink",
     "type": "Functional",
     "strength": 85,
@@ -277,12 +335,15 @@
     "feeling": 25,
     "health": -1,
     "price": 16.5,
-    "exp": 48
+    "exp": 48,
+    "likability": 0,
+    "description": "困了累了，大鹏特饮"
   },
   {
     "id": "020",
     "src": "food/020.webp",
     "name": "黄牛",
+    "category": "drinks",
     "graph": "drink",
     "type": "Functional",
     "strength": 85,
@@ -291,12 +352,15 @@
     "feeling": 25,
     "health": -1,
     "price": 19,
-    "exp": 64
+    "exp": 64,
+    "likability": 0,
+    "description": "放心，喝他的饮料不是他出钱你出命"
   },
   {
     "id": "021",
     "src": "food/021.webp",
     "name": "能量饮料",
+    "category": "drinks",
     "graph": "drink",
     "type": "Functional",
     "strength": 80,
@@ -305,12 +369,15 @@
     "feeling": 20,
     "health": -5,
     "price": 22.5,
-    "exp": 112
+    "exp": 112,
+    "likability": 0,
+    "description": "能量饮料能够瞬间给予角色40点能量加成。使用时执行某些动作将会取消使用，有4秒使用时间。（以上都没有）"
   },
   {
     "id": "022",
     "src": "food/022.webp",
     "name": "土力架",
+    "category": "foods",
     "graph": "eat",
     "type": "Functional",
     "strength": 80,
@@ -319,12 +386,15 @@
     "feeling": 0,
     "health": 0,
     "price": 18,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "横扫自己，做回饥饿"
   },
   {
     "id": "023",
     "src": "food/023.webp",
     "name": "压缩饼干",
+    "category": "foods",
     "graph": "eat",
     "type": "Functional",
     "strength": 60,
@@ -333,12 +403,15 @@
     "feeling": 0,
     "health": 0,
     "price": 19,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "饼干.rar"
   },
   {
     "id": "024",
     "src": "food/024.webp",
     "name": "爆米花",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 40,
@@ -347,12 +420,15 @@
     "feeling": 25,
     "health": -1,
     "price": 8.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "电影必备，吃不完也要买"
   },
   {
     "id": "025",
     "src": "food/025.webp",
     "name": "冰激凌",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 40,
@@ -361,12 +437,15 @@
     "feeling": 50,
     "health": -0.5,
     "price": 10,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "中国人免费领"
   },
   {
     "id": "026",
     "src": "food/026.webp",
     "name": "瓜子",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 30,
@@ -375,12 +454,15 @@
     "feeling": 37,
     "health": 0,
     "price": 8.5,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱嘎吱"
   },
   {
     "id": "027",
     "src": "food/027.webp",
     "name": "核桃仁",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 20,
@@ -389,12 +471,15 @@
     "feeling": 0,
     "health": 5,
     "price": 12,
-    "exp": 32
+    "exp": 32,
+    "likability": 0,
+    "description": "这次不用自己带锤子了"
   },
   {
     "id": "028",
     "src": "food/028.webp",
     "name": "火腿肠",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 40,
@@ -403,12 +488,15 @@
     "feeling": 0,
     "health": -0.5,
     "price": 9,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "肉做的棒子"
   },
   {
     "id": "029",
     "src": "food/029.webp",
     "name": "花生米",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 20,
@@ -417,12 +505,15 @@
     "feeling": 0,
     "health": -0.5,
     "price": 4.5,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "但凡有一粒花生米。。。"
   },
   {
     "id": "030",
     "src": "food/030.webp",
     "name": "戒指糖",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 20,
@@ -431,12 +522,15 @@
     "feeling": 0,
     "health": -0.5,
     "price": 2.5,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "这不比那个不能吃的破石头有用多了"
   },
   {
     "id": "031",
     "src": "food/031.webp",
     "name": "老冰棍",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 15,
@@ -445,12 +539,15 @@
     "feeling": 5,
     "health": -0.5,
     "price": 4.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "厂家正在考虑与辐射4联动中"
   },
   {
     "id": "032",
     "src": "food/032.webp",
     "name": "绿色心情",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 5,
@@ -459,12 +556,15 @@
     "feeling": 12,
     "health": -0.5,
     "price": 3.5,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "几年前还是一块钱的呜呜呜"
   },
   {
     "id": "033",
     "src": "food/033.webp",
     "name": "奶片",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 8,
@@ -473,12 +573,15 @@
     "feeling": 17,
     "health": 0,
     "price": 3.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "希望你们永远不会知道这个药。。。"
   },
   {
     "id": "034",
     "src": "food/034.webp",
     "name": "奶糖",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 8,
@@ -487,12 +590,15 @@
     "feeling": 37,
     "health": 0,
     "price": 6.5,
-    "exp": 12
+    "exp": 12,
+    "likability": 0,
+    "description": "小白兔牌"
   },
   {
     "id": "035",
     "src": "food/035.webp",
     "name": "牛板筋",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 10,
@@ -501,12 +607,15 @@
     "feeling": 25,
     "health": -1,
     "price": 3.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "只要来一根，大家都是好兄弟"
   },
   {
     "id": "036",
     "src": "food/036.webp",
     "name": "牛扎糖",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 10,
@@ -515,12 +624,15 @@
     "feeling": 37,
     "health": 0,
     "price": 5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "好甜，像你一样"
   },
   {
     "id": "037",
     "src": "food/037.webp",
     "name": "泡泡糖",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 5,
@@ -529,12 +641,15 @@
     "feeling": 42,
     "health": 0,
     "price": 5,
-    "exp": 12
+    "exp": 12,
+    "likability": 0,
+    "description": "就吹吧你"
   },
   {
     "id": "038",
     "src": "food/038.webp",
     "name": "巧克力",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 30,
@@ -543,12 +658,15 @@
     "feeling": 37,
     "health": 0,
     "price": 11,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "纵享丝滑"
   },
   {
     "id": "039",
     "src": "food/039.webp",
     "name": "软糖",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 5,
@@ -557,12 +675,15 @@
     "feeling": 12,
     "health": 0,
     "price": 4,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "come on baby~"
   },
   {
     "id": "040",
     "src": "food/040.webp",
     "name": "薯片",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 10,
@@ -571,12 +692,15 @@
     "feeling": 12,
     "health": 0,
     "price": 6.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "开趴必备"
   },
   {
     "id": "041",
     "src": "food/041.webp",
     "name": "娃仔小馒头",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 15,
@@ -585,12 +709,15 @@
     "feeling": 25,
     "health": 0,
     "price": 5.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "这是我们的宝贝~~"
   },
   {
     "id": "042",
     "src": "food/042.webp",
     "name": "小布丁",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 10,
@@ -599,12 +726,15 @@
     "feeling": 12,
     "health": 0,
     "price": 4.5,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "没关系，小小的也很好吃"
   },
   {
     "id": "043",
     "src": "food/043.webp",
     "name": "雪饼",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 10,
@@ -613,12 +743,15 @@
     "feeling": 25,
     "health": 0,
     "price": 6,
-    "exp": 8
+    "exp": 8,
+    "likability": 0,
+    "description": "小时候的一口吃不下"
   },
   {
     "id": "044",
     "src": "food/044.webp",
     "name": "散射雪糕",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 10,
@@ -627,12 +760,15 @@
     "feeling": 25,
     "health": 0,
     "price": 7,
-    "exp": 4
+    "exp": 4,
+    "likability": 0,
+    "description": "三倍的快乐"
   },
   {
     "id": "045",
     "src": "food/045.webp",
     "name": "猪肉脯",
+    "category": "foods",
     "graph": "eat",
     "type": "Snack",
     "strength": 40,
@@ -641,12 +777,15 @@
     "feeling": 37,
     "health": 0,
     "price": 14.5,
-    "exp": 12
+    "exp": 12,
+    "likability": 0,
+    "description": "你感觉在吃牛皮。。"
   },
   {
     "id": "046",
     "src": "food/046.webp",
     "name": "臭豆腐",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -655,12 +794,15 @@
     "feeling": 12,
     "health": 0,
     "price": 23,
-    "exp": 40
+    "exp": 40,
+    "likability": 0,
+    "description": "闻起来臭，吃起来也臭，就是越吃越香。"
   },
   {
     "id": "047",
     "src": "food/047.webp",
     "name": "东坡肘子",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -669,12 +811,15 @@
     "feeling": 75,
     "health": 1,
     "price": 46,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "小知识：东坡肘子其实并非苏东坡之功，而是其妻子王弗的妙作"
   },
   {
     "id": "048",
     "src": "food/048.webp",
     "name": "番茄意面",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -683,12 +828,15 @@
     "feeling": 50,
     "health": 1,
     "price": 42,
-    "exp": 80
+    "exp": 80,
+    "likability": 0,
+    "description": "只要不是巧克力酱什么都好说。。"
   },
   {
     "id": "049",
     "src": "food/049.webp",
     "name": "红烧狮子头",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 120,
@@ -697,12 +845,15 @@
     "feeling": 75,
     "health": 1,
     "price": 48,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "芋头西米露"
   },
   {
     "id": "050",
     "src": "food/050.webp",
     "name": "红烧牛肉",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 140,
@@ -711,12 +862,15 @@
     "feeling": 75,
     "health": 1,
     "price": 56,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "不是4块钱的，请放心"
   },
   {
     "id": "051",
     "src": "food/051.webp",
     "name": "华夫饼",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -725,12 +879,15 @@
     "feeling": 75,
     "health": 0,
     "price": 33.5,
-    "exp": 56
+    "exp": 56,
+    "likability": 0,
+    "description": "蜜饼！小刻最爱！"
   },
   {
     "id": "052",
     "src": "food/052.webp",
     "name": "鸡翅",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -739,12 +896,15 @@
     "feeling": 50,
     "health": 0,
     "price": 25.5,
-    "exp": 24
+    "exp": 24,
+    "likability": 0,
+    "description": "红烧翅膀~我喜欢吃~"
   },
   {
     "id": "053",
     "src": "food/053.webp",
     "name": "煎西冷牛排",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 140,
@@ -753,12 +913,15 @@
     "feeling": 100,
     "health": 10,
     "price": 84.5,
-    "exp": 180
+    "exp": 180,
+    "likability": 1,
+    "description": "开瓶可乐吧，上流"
   },
   {
     "id": "054",
     "src": "food/054.webp",
     "name": "辣子鸡",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -767,12 +930,15 @@
     "feeling": 100,
     "health": 0,
     "price": 52,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "当红辣子鸡哟"
   },
   {
     "id": "055",
     "src": "food/055.webp",
     "name": "罗宋汤",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -781,12 +947,15 @@
     "feeling": 75,
     "health": 0,
     "price": 42.5,
-    "exp": 80
+    "exp": 80,
+    "likability": 0,
+    "description": "咲夜！“给我吃!”"
   },
   {
     "id": "056",
     "src": "food/056.webp",
     "name": "麻婆豆腐",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -795,12 +964,15 @@
     "feeling": 75,
     "health": 0,
     "price": 39,
-    "exp": 60
+    "exp": 60,
+    "likability": 0,
+    "description": "麻婆豆腐之所以叫麻婆豆腐是因为麻婆喜欢吃"
   },
   {
     "id": "057",
     "src": "food/057.webp",
     "name": "梅菜扣肉",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -809,12 +981,15 @@
     "feeling": 62,
     "health": 0,
     "price": 43,
-    "exp": 100
+    "exp": 100,
+    "likability": 0,
+    "description": "不会咬人的谢谢"
   },
   {
     "id": "058",
     "src": "food/058.webp",
     "name": "面包",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 50,
@@ -823,12 +998,15 @@
     "feeling": 25,
     "health": 0,
     "price": 21,
-    "exp": 0
+    "exp": 0,
+    "likability": 0,
+    "description": "你还记得你吃过多少块面包吗"
   },
   {
     "id": "059",
     "src": "food/059.webp",
     "name": "南瓜吐司",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 80,
@@ -837,12 +1015,15 @@
     "feeling": 37,
     "health": 0,
     "price": 30.5,
-    "exp": 40
+    "exp": 40,
+    "likability": 0,
+    "description": "加了南瓜！是的！我加了南瓜！"
   },
   {
     "id": "060",
     "src": "food/060.webp",
     "name": "酿豆腐",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -851,12 +1032,15 @@
     "feeling": 37,
     "health": 0,
     "price": 32,
-    "exp": 60
+    "exp": 60,
+    "likability": 0,
+    "description": "你中有我，我中有你"
   },
   {
     "id": "061",
     "src": "food/061.webp",
     "name": "披萨",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -865,12 +1049,15 @@
     "feeling": 50,
     "health": 0,
     "price": 46,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "不要放菠萝！！！"
   },
   {
     "id": "062",
     "src": "food/062.webp",
     "name": "三明治",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 80,
@@ -879,12 +1066,15 @@
     "feeling": 37,
     "health": 0,
     "price": 28,
-    "exp": 40
+    "exp": 40,
+    "likability": 0,
+    "description": "两面包夹芝士"
   },
   {
     "id": "063",
     "src": "food/063.webp",
     "name": "沙拉",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 80,
@@ -893,12 +1083,15 @@
     "feeling": 12,
     "health": 10,
     "price": 49,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "沙拉沙拉啦啦啦"
   },
   {
     "id": "064",
     "src": "food/064.webp",
     "name": "烧鹅",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 120,
@@ -907,12 +1100,15 @@
     "feeling": 75,
     "health": 0,
     "price": 48.5,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "官方特意调整成鹅的，这让我文案不好做啊，我就要在这里写上烧鸡两个大字！"
   },
   {
     "id": "065",
     "src": "food/065.webp",
     "name": "酸菜鱼",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 120,
@@ -921,12 +1117,15 @@
     "feeling": 87,
     "health": 0,
     "price": 51,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "人人皆是酸菜鱼"
   },
   {
     "id": "066",
     "src": "food/066.webp",
     "name": "西冷牛排",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 120,
@@ -935,12 +1134,15 @@
     "feeling": 100,
     "health": 15,
     "price": 90,
-    "exp": 200
+    "exp": 200,
+    "likability": 1,
+    "description": "开瓶拉菲吧，上流"
   },
   {
     "id": "067",
     "src": "food/067.webp",
     "name": "香煎牛仔骨",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 120,
@@ -949,12 +1151,15 @@
     "feeling": 125,
     "health": 10,
     "price": 101.5,
-    "exp": 240
+    "exp": 240,
+    "likability": 2,
+    "description": "开瓶红酒吧，上流"
   },
   {
     "id": "068",
     "src": "food/068.webp",
     "name": "盐焗鸡",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -963,12 +1168,15 @@
     "feeling": 75,
     "health": 0,
     "price": 45.5,
-    "exp": 120
+    "exp": 120,
+    "likability": 0,
+    "description": "谁说的腌鸡！站出来！"
   },
   {
     "id": "069",
     "src": "food/069.webp",
     "name": "芝士焗虾",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 80,
@@ -977,12 +1185,15 @@
     "feeling": 75,
     "health": 0,
     "price": 37.5,
-    "exp": 100
+    "exp": 100,
+    "likability": 0,
+    "description": "焗虾闭嘴"
   },
   {
     "id": "070",
     "src": "food/070.webp",
     "name": "纸包鸡",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 85,
@@ -991,12 +1202,15 @@
     "feeling": 75,
     "health": 0,
     "price": 35.5,
-    "exp": 80
+    "exp": 80,
+    "likability": 0,
+    "description": "纸包鸡包纸包鸡包鸡包纸"
   },
   {
     "id": "071",
     "src": "food/071.webp",
     "name": "炸鸡腿",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 40,
@@ -1005,12 +1219,15 @@
     "feeling": 50,
     "health": 0,
     "price": 18.5,
-    "exp": 40
+    "exp": 40,
+    "likability": 0,
+    "description": "你每吃一个炸鸡腿，就有0.5只鸡受到伤害。保护鸡鸡，从一次吃两个炸鸡腿做起！"
   },
   {
     "id": "072",
     "src": "food/072.webp",
     "name": "汉堡",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 60,
@@ -1019,12 +1236,15 @@
     "feeling": 50,
     "health": 0,
     "price": 23,
-    "exp": 40
+    "exp": 40,
+    "likability": 0,
+    "description": "还想要汉O王？这价格不是华O士已经对你很好了。"
   },
   {
     "id": "073",
     "src": "food/073.webp",
     "name": "地球",
+    "category": "foods",
     "graph": "eat",
     "type": "Functional",
     "strength": -60,
@@ -1033,12 +1253,15 @@
     "feeling": 0,
     "health": 0,
     "price": 0,
-    "exp": -60
+    "exp": -60,
+    "likability": -1,
+    "description": "没钱也能吃,可以用来拯救存档(饥饿/口渴不足), 没事别吃这个"
   },
   {
     "id": "074",
     "src": "food/074.webp",
     "name": "yearmantou",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -1047,12 +1270,15 @@
     "feeling": 120,
     "health": 2,
     "price": 96,
-    "exp": 200
+    "exp": 200,
+    "likability": 3,
+    "description": "大的小的圆的方的长的短的扁的条的都是馒头，甜的咸的牛奶蔬菜杂粮原味都好吃！"
   },
   {
     "id": "075",
     "src": "food/075.webp",
     "name": "yearchicken",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 240,
@@ -1061,12 +1287,15 @@
     "feeling": 100,
     "health": 1,
     "price": 98,
-    "exp": 100
+    "exp": 100,
+    "likability": 2,
+    "description": "南方必备年菜---鸡，当然不论炒鸡、白切鸡、卤鸡、烧鸡还是大盘鸡都算。同理可得，圣诞节烤鸡也是年菜。"
   },
   {
     "id": "076",
     "src": "food/076.webp",
     "name": "yearfish",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 160,
@@ -1075,12 +1304,15 @@
     "feeling": 100,
     "health": 1,
     "price": 72.5,
-    "exp": 100
+    "exp": 100,
+    "likability": 2,
+    "description": "主人主人，你的红烧鱼确实很香，但还是太吃厨艺了，有没有更加简单又好吃的年菜推荐一下吗？"
   },
   {
     "id": "077",
     "src": "food/077.webp",
     "name": "yearjiaozi",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 100,
@@ -1089,12 +1321,15 @@
     "feeling": 120,
     "health": 2,
     "price": 100,
-    "exp": 200
+    "exp": 200,
+    "likability": 3,
+    "description": "《猪肉白菜馅可是经典》 /n《羊肉大葱馅也非常好吃》 /n《三鲜馅也是不错的选择》 /n《什么叫西红柿炒蛋馅？》"
   },
   {
     "id": "078",
     "src": "food/078.webp",
     "name": "白切鸡",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 240,
@@ -1103,12 +1338,15 @@
     "feeling": 120,
     "health": 1,
     "price": 65.6,
-    "exp": 100
+    "exp": 100,
+    "likability": 1.5,
+    "description": "是的，去年也是白切鸡，30吃到15，去年吃到今年，陷入白切鸡的循环循环循环…"
   },
   {
     "id": "079",
     "src": "food/079.webp",
     "name": "清蒸鲈鱼",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 260,
@@ -1117,12 +1355,15 @@
     "feeling": 100,
     "health": 1,
     "price": 53.2,
-    "exp": 100
+    "exp": 100,
+    "likability": 1.5,
+    "description": "看来去年的红烧鱼确实不受欢迎，今年改清蒸了。"
   },
   {
     "id": "080",
     "src": "food/080.webp",
     "name": "芋头扣肉",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 180,
@@ -1131,12 +1372,15 @@
     "feeling": 100,
     "health": 1,
     "price": 73.2,
-    "exp": 200
+    "exp": 200,
+    "likability": 2,
+    "description": "龟公咯，你怎么把扣肉打翻了，现在立刻给我滚出村子！"
   },
   {
     "id": "081",
     "src": "food/081.webp",
     "name": "油爆大虾",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 140,
@@ -1145,12 +1389,15 @@
     "feeling": 140,
     "health": 0.5,
     "price": 75.2,
-    "exp": 300
+    "exp": 300,
+    "likability": 2,
+    "description": "甜咸之争已经不重要了，现在该来讨论大虾白灼还是爆炒了！"
   },
   {
     "id": "082",
     "src": "food/082.webp",
     "name": "为了这碟醋",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 200,
@@ -1159,12 +1406,15 @@
     "feeling": 120,
     "health": 3,
     "price": 83.6,
-    "exp": 200
+    "exp": 200,
+    "likability": 3,
+    "description": "原来饺子醋在这里。"
   },
   {
     "id": "083",
     "src": "food/083.webp",
     "name": "APhone X",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1173,12 +1423,15 @@
     "feeling": 290,
     "health": 0,
     "price": 974,
-    "exp": 5000
+    "exp": 5000,
+    "likability": 25,
+    "description": "几年前的APhone，性能比较落后了，但是勉强还能用。"
   },
   {
     "id": "084",
     "src": "food/084.webp",
     "name": "APhone 12",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1187,12 +1440,15 @@
     "feeling": 590,
     "health": 0,
     "price": 2199,
-    "exp": 10000
+    "exp": 10000,
+    "likability": 100,
+    "description": "近几年出的APhone，由于出来一段时间了，现在性价比最高。"
   },
   {
     "id": "085",
     "src": "food/085.webp",
     "name": "APhone 14 Pro",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1201,12 +1457,15 @@
     "feeling": 1190,
     "health": 0,
     "price": 4399,
-    "exp": 20000
+    "exp": 20000,
+    "likability": 200,
+    "description": "最新款APhone，女神的最爱，经常在现充圈作为货币使用，比较伤肾。"
   },
   {
     "id": "086",
     "src": "food/086.webp",
     "name": "Shiori v1",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1215,12 +1474,15 @@
     "feeling": 110,
     "health": 0,
     "price": 214,
-    "exp": 500
+    "exp": 500,
+    "likability": 25,
+    "description": "基础版Shiori相机，非常适合入门使用，小白也能拍出好照片。"
   },
   {
     "id": "087",
     "src": "food/087.webp",
     "name": "Shiori v5",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1229,12 +1491,15 @@
     "feeling": 150,
     "health": 0,
     "price": 425,
-    "exp": 1000
+    "exp": 1000,
+    "likability": 50,
+    "description": "进阶款Shiori相机，一般想深入摄影圈的人使用，一入摄影深似海啊。"
   },
   {
     "id": "088",
     "src": "food/088.webp",
     "name": "Shiori v7",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1243,12 +1508,15 @@
     "feeling": 190,
     "health": 0,
     "price": 635.5,
-    "exp": 1500
+    "exp": 1500,
+    "likability": 75,
+    "description": "顶配版Shiori相机，拥有他你就是摄影圈的焦点，不管你到底会不会拍照。"
   },
   {
     "id": "089",
     "src": "food/089.webp",
     "name": "Inter i5-8400",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1257,12 +1525,15 @@
     "feeling": 290,
     "health": 0,
     "price": 1099,
-    "exp": 5000
+    "exp": 5000,
+    "likability": 50,
+    "description": "第8代Inter酷瑞™i5处理器,借助新一代显卡、内置人工智能技术,随时随地畅玩游戏"
   },
   {
     "id": "090",
     "src": "food/090.webp",
     "name": "Inter i7-11700",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1271,12 +1542,15 @@
     "feeling": 1490,
     "health": 0,
     "price": 2124,
-    "exp": 10000
+    "exp": 10000,
+    "likability": 75,
+    "description": "第11代Inter酷瑞™i7处理器，借助极速 CPU 性能、独立显卡、人工智能加速技术，随时随地畅玩游戏"
   },
   {
     "id": "091",
     "src": "food/091.webp",
     "name": "Inter i9-14900",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1285,12 +1559,15 @@
     "feeling": 1790,
     "health": 0,
     "price": 3099,
-    "exp": 15000
+    "exp": 15000,
+    "likability": 100,
+    "description": "第14代Inter酷瑞™i9处理器，助您在 4K 分辨率下畅玩热门游戏"
   },
   {
     "id": "092",
     "src": "food/092.webp",
     "name": "普通麦克风",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1299,12 +1576,15 @@
     "feeling": 30,
     "health": 0,
     "price": 48,
-    "exp": 250
+    "exp": 250,
+    "likability": 1,
+    "description": "普通的麦克风，和朋友开开黑没问题啦，我的麦真的很炸吗？"
   },
   {
     "id": "093",
     "src": "food/093.webp",
     "name": "较好的麦克风",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1313,12 +1593,15 @@
     "feeling": 30,
     "health": 0,
     "price": 90,
-    "exp": 500
+    "exp": 500,
+    "likability": 1,
+    "description": "较好的麦克风，在下不会炸麦啦。"
   },
   {
     "id": "094",
     "src": "food/094.webp",
     "name": "好的麦克风",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1327,12 +1610,15 @@
     "feeling": 30,
     "health": 0,
     "price": 198,
-    "exp": 1150
+    "exp": 1150,
+    "likability": 1,
+    "description": "好的麦克风，直播入门款，拼夕夕限时特价拼团价19.8！"
   },
   {
     "id": "095",
     "src": "food/095.webp",
     "name": "很好的麦克风",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1341,12 +1627,15 @@
     "feeling": 50,
     "health": 0,
     "price": 444,
-    "exp": 2500
+    "exp": 2500,
+    "likability": 5,
+    "description": "很好的麦克风，正经主播用的麦克风，直播收音非常好。"
   },
   {
     "id": "096",
     "src": "food/096.webp",
     "name": "非常好的麦克风",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1355,12 +1644,15 @@
     "feeling": 70,
     "health": 0,
     "price": 897,
-    "exp": 5000
+    "exp": 5000,
+    "likability": 12,
+    "description": "非常好的麦克风，录音室级的麦克风，专业的就是不一样。"
   },
   {
     "id": "097",
     "src": "food/097.webp",
     "name": "超级好的麦克风",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1369,12 +1661,15 @@
     "feeling": 1020,
     "health": 0,
     "price": 1898,
-    "exp": 10000
+    "exp": 10000,
+    "likability": 35,
+    "description": "超级好的麦克风，顶级的麦克风，ASMR就是用的这种麦克风，录下来的声音身临其境。"
   },
   {
     "id": "098",
     "src": "food/098.webp",
     "name": "GTC1660",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1383,12 +1678,15 @@
     "feeling": 150,
     "health": 0,
     "price": 800,
-    "exp": 2500
+    "exp": 2500,
+    "likability": 75,
+    "description": "玩家保有量最多的显卡，可流畅游玩大部分3A，不过也是好几年前的事情了，毕竟30帧电竞。"
   },
   {
     "id": "099",
     "src": "food/099.webp",
     "name": "GTC2070",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1397,12 +1695,15 @@
     "feeling": 1010,
     "health": 0,
     "price": 2889,
-    "exp": 12500
+    "exp": 12500,
+    "likability": 150,
+    "description": "保有量第二多的显卡，刀法精湛性价比高，真正意义上的可流畅游玩大部分3A。"
   },
   {
     "id": "100",
     "src": "food/100.webp",
     "name": "GTC4090",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1411,12 +1712,15 @@
     "feeling": 1490,
     "health": 0,
     "price": 5999,
-    "exp": 25000
+    "exp": 25000,
+    "likability": 350,
+    "description": "最新款的显卡，50系什么时候整啊老黄你给句话啊。"
   },
   {
     "id": "101",
     "src": "food/101.webp",
     "name": "GTC5090",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1425,12 +1729,15 @@
     "feeling": 1490,
     "health": 0,
     "price": 6999,
-    "exp": 31000
+    "exp": 31000,
+    "likability": 350,
+    "description": "GTC5090显卡，老黄的隐藏法宝。完美适配《嗨神话 吗喽》，稳定16K全高480帧。贵？贵不是显卡的缺点，是你的缺点！"
   },
   {
     "id": "102",
     "src": "food/102.webp",
     "name": "嗨神话吗喽",
+    "category": "gifts",
     "graph": "gift",
     "type": "Gift",
     "strength": 0,
@@ -1439,12 +1746,15 @@
     "feeling": 120,
     "health": 0,
     "price": 1998,
-    "exp": 10450
+    "exp": 10450,
+    "likability": 50,
+    "description": "《嗨神话 吗喽》抢先预购究极豪华Pro加量实体版，由游戏迷信制作，讲述一只天命吗喽与空气墙，堆怪，远程敌人，转角偷袭，快慢刀连击BOSS斗智斗勇的故事。"
   },
   {
     "id": "103",
     "src": "food/103.webp",
     "name": "茶",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -1453,12 +1763,15 @@
     "feeling": 25,
     "health": 5,
     "price": 19.5,
-    "exp": 10
+    "exp": 10,
+    "likability": 0,
+    "description": "中国正统传统饮料，消食解腻，饭后必备。"
   },
   {
     "id": "104",
     "src": "food/104.webp",
     "name": "纯牛奶",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 20,
@@ -1467,12 +1780,15 @@
     "feeling": 30,
     "health": 2,
     "price": 17.5,
-    "exp": 10
+    "exp": 10,
+    "likability": 0,
+    "description": "每天一杯奶，强壮好桌宠！"
   },
   {
     "id": "105",
     "src": "food/105.webp",
     "name": "格瓦斯",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 20,
@@ -1481,12 +1797,15 @@
     "feeling": 10,
     "health": 2,
     "price": 26,
-    "exp": 60
+    "exp": 60,
+    "likability": 0,
+    "description": "液体面包，在俄罗斯的传说中，斯拉夫勇士为了重新变得爷们，经常喝这玩意。"
   },
   {
     "id": "106",
     "src": "food/106.webp",
     "name": "1L纯净水",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -1495,12 +1814,15 @@
     "feeling": -15,
     "health": 0.5,
     "price": 25.5,
-    "exp": 20
+    "exp": 20,
+    "likability": 0,
+    "description": "一般来说是这是多人份，你一个人吨完算你厉害…达成成就-多喝水"
   },
   {
     "id": "107",
     "src": "food/107.webp",
     "name": "奶茶",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 70,
@@ -1509,12 +1831,15 @@
     "feeling": 25,
     "health": -1,
     "price": 22,
-    "exp": 40
+    "exp": 40,
+    "likability": 0,
+    "description": "秋天的第一杯奶茶，少冰，七糖，加珍珠打包带走不要纸管谢谢。"
   },
   {
     "id": "108",
     "src": "food/108.webp",
     "name": "啤酒",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -1523,12 +1848,15 @@
     "feeling": 10,
     "health": -2,
     "price": 12.5,
-    "exp": 20
+    "exp": 20,
+    "likability": 0,
+    "description": "也是液体面包，雪崩的时候,每一片雪花都在勇闯天涯。"
   },
   {
     "id": "109",
     "src": "food/109.webp",
     "name": "威士忌",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 5,
@@ -1537,12 +1865,15 @@
     "feeling": 20,
     "health": -4,
     "price": 69.5,
-    "exp": 393
+    "exp": 393,
+    "likability": 0,
+    "description": "哦，我亲爱的朋友，请容许我给你倒一杯威士忌加冰。哦不用谢我的老伙计，这是我应该的。"
   },
   {
     "id": "110",
     "src": "food/110.webp",
     "name": "白酒",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 10,
@@ -1551,12 +1882,15 @@
     "feeling": 20,
     "health": -3,
     "price": 110,
-    "exp": 622
+    "exp": 622,
+    "likability": 0,
+    "description": "哎意呀意呀意呀意呀~你~爱古梁~地窖1578"
   },
   {
     "id": "111",
     "src": "food/111.webp",
     "name": "伏特加",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": -5,
@@ -1565,12 +1899,15 @@
     "feeling": 50,
     "health": -5,
     "price": 90,
-    "exp": 522
+    "exp": 522,
+    "likability": 0,
+    "description": "同志！伏特加！吨吨吨！同志！波波沙！哒哒哒！"
   },
   {
     "id": "112",
     "src": "food/112.webp",
     "name": "鸡尾酒",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": -5,
@@ -1579,12 +1916,15 @@
     "feeling": 20,
     "health": -1,
     "price": 27.5,
-    "exp": 123
+    "exp": 123,
+    "likability": 0,
+    "description": "预调的鸡尾酒，看不到调酒师的花活了，酒味好像也淡了点。"
   },
   {
     "id": "113",
     "src": "food/113.webp",
     "name": "矿泉水",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 0,
@@ -1593,12 +1933,15 @@
     "feeling": 5,
     "health": 1,
     "price": 16,
-    "exp": 10
+    "exp": 10,
+    "likability": 0,
+    "description": "一饮矿泉水,方知海南人寿长。"
   },
   {
     "id": "114",
     "src": "food/114.webp",
     "name": "苏打水",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 0,
@@ -1607,12 +1950,15 @@
     "feeling": 5,
     "health": 1,
     "price": 15,
-    "exp": 10
+    "exp": 10,
+    "likability": 0,
+    "description": "怎么会有人喜欢喝碳酸氢钠的水溶液？"
   },
   {
     "id": "115",
     "src": "food/115.webp",
     "name": "热白开",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 0,
@@ -1621,12 +1967,15 @@
     "feeling": 1,
     "health": 0.5,
     "price": 16,
-    "exp": 10
+    "exp": 10,
+    "likability": 0,
+    "description": "白开水，更适合桌宠宝宝体质的饮用水。"
   },
   {
     "id": "116",
     "src": "food/116.webp",
     "name": "电解质水",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 20,
@@ -1635,12 +1984,15 @@
     "feeling": 5,
     "health": 4,
     "price": 23.5,
-    "exp": 25
+    "exp": 25,
+    "likability": 0,
+    "description": "含有适当浓度、适当比例的电解质、微量元素等，反正就是很健康！"
   },
   {
     "id": "117",
     "src": "food/117.webp",
     "name": "蒸馏水",
+    "category": "drinks",
     "graph": "drink",
     "type": "Drink",
     "strength": 0,
@@ -1649,12 +2001,15 @@
     "feeling": 1,
     "health": -0.5,
     "price": 16.5,
-    "exp": 10
+    "exp": 10,
+    "likability": 0,
+    "description": "最正宗的水，其实不合适长期饮用"
   },
   {
     "id": "118",
     "src": "food/118.webp",
     "name": "大肉粽",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 40,
@@ -1663,12 +2018,15 @@
     "feeling": 40,
     "health": 1,
     "price": 85,
-    "exp": 200
+    "exp": 200,
+    "likability": 4,
+    "description": "朴实无华的大肉粽，由板栗咸蛋黄和大块五花肉包成的粽子，一口咬下去鲜嫩多汁满满肉料，至福！"
   },
   {
     "id": "119",
     "src": "food/119.webp",
     "name": "凉粽",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 20,
@@ -1677,12 +2035,15 @@
     "feeling": 30,
     "health": 1,
     "price": 75,
-    "exp": 250
+    "exp": 250,
+    "likability": 2,
+    "description": "也叫“灰水粽”，就是把小粽子，放冰箱冻凉了拿出来沾蜂蜜吃，是粽子家族中的甜品。"
   },
   {
     "id": "120",
     "src": "food/120.webp",
     "name": "甜粽子",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 60,
@@ -1691,12 +2052,15 @@
     "feeling": 60,
     "health": 1,
     "price": 87,
-    "exp": 260
+    "exp": 260,
+    "likability": 3,
+    "description": "顾名思义，就是以甜食为主要馅料的粽子。甜食包括红枣、豆沙、莲蓉、桂花、花生、栗子等等。甜粽永不为奴！"
   },
   {
     "id": "121",
     "src": "food/121.webp",
     "name": "咸粽子",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 80,
@@ -1705,12 +2069,15 @@
     "feeling": 50,
     "health": 1,
     "price": 92,
-    "exp": 280
+    "exp": 280,
+    "likability": 3,
+    "description": "咸粽，就是以咸食为主要馅料的粽子。咸食包括肉类、蛋类、菌类、海鲜类等等。为了咸粽！"
   },
   {
     "id": "122",
     "src": "food/122.webp",
     "name": "粽叶糍粑",
+    "category": "foods",
     "graph": "eat",
     "type": "Meal",
     "strength": 65,
@@ -1719,6 +2086,8 @@
     "feeling": 40,
     "health": 1,
     "price": 74.5,
-    "exp": 220
+    "exp": 220,
+    "likability": 2,
+    "description": "用芭蕉叶包起来的糯米糍粑，软软糯糯，老少皆宜，就算不是端午节，也经常有人做，是一道亲民的小吃。"
   }
 ]

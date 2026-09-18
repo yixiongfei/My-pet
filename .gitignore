@@ -11,6 +11,12 @@ apps/desktop/public/pet/
 # legacy/ 是原版 C# 工程的只读参考，从上游克隆即可
 assets-src/*
 !assets-src/README.md
+!assets-src/pet/
+assets-src/pet/*
+!assets-src/pet/vup.json
+!assets-src/food/
+assets-src/food/*
+!assets-src/food/food.json
 legacy/
 
 # tauri

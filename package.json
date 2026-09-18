@@ -5,6 +5,8 @@
   "description": "VPet 重构：有身体的 Personal Agent（Tauri 2 + React + Rust core + TS brain）",
   "packageManager": "pnpm@12.4.2",
   "scripts": {
+    "convert:pet": "node scripts/build-assets.mjs --convert-pet",
+    "convert:food": "node scripts/build-assets.mjs --convert-food",
     "build:assets": "node scripts/build-assets.mjs",
     "dev": "pnpm --filter @vpet/desktop tauri dev",
     "dev:onnx": "pnpm --filter @vpet/desktop tauri dev -- --features embed",

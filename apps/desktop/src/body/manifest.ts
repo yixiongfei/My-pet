@@ -12,7 +12,7 @@ export async function loadManifest(): Promise<Manifest> {
   return Manifest.parse(await res.json())
 }
 
-/** 读取 vup.lps 转出的 pet.json：触摸区域、提起锚点 */
+/** 读取 vup.json.profile 生成的 pet.json：触摸区域、提起锚点 */
 export async function loadProfile(): Promise<PetProfile> {
   const res = await fetch(`${PET_BASE}/pet.json`)
   if (!res.ok) throw new Error(`pet.json ${res.status}：先运行 pnpm build:assets`)

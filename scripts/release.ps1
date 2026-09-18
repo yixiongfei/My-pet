@@ -35,7 +35,8 @@ if ($running.Count -gt 0) {
     $running | Stop-Process -Force -ErrorAction Stop
     # Windows keeps an executable locked until process teardown is complete. Waiting on the
     # process objects is deterministic; a fixed sleep occasionally raced the release linker.
-    $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+    # WebView2 / 音频仍在收尾时，进程句柄偶尔会比 10 秒更晚释放；等足 30 秒仍在才算异常。
+    $running | Wait-Process -Timeout 30 -ErrorAction SilentlyContinue
     $left = @(Get-Process -Name 'vpet' -ErrorAction SilentlyContinue)
     if ($left.Count -gt 0) {
         $ids = ($left | ForEach-Object Id) -join ', '

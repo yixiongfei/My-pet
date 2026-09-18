@@ -5,7 +5,7 @@
 
 ## 1. 原版的动画规则（我们完整承接）
 
-资产来自 VPet-Simulator 的 `mod/0000_core/pet/vup/`：6181 帧 1000×1000 PNG，按目录组织。原版 `GraphInfo.cs` **从路径推断**每段动画的四个属性：
+资产来自 VPet-Simulator 的 `mod/0000_core/pet/vup/`：当前本机 6875 帧 1000×1000 PNG，按目录组织。原版 `GraphInfo.cs` **从路径推断**每段动画的四个属性：
 
 ```
 路径按 \ 和 _ 拆 token，依次吃掉：
@@ -13,8 +13,12 @@
   ② 类型   default | say | touch_head | touch_body | idel | sleep | work | move | raised_* | sidehide_* | switch_* …（GraphType）
   ③ 段落   A / Start → A_Start    B / Loop → B_Loop    C / End → C_End    Single（没有 → Single）
   ④ 名字   剩下 token 的最后一个（去掉数字 / ~ 变体后缀）；没有 → 类型名
-帧文件：<前缀>_<序号>_<时长ms>.png        同目录 info.lps 可覆盖任何字段
+帧文件：<前缀>_<序号>_<时长ms>.png        原版同目录 info.lps 可覆盖任何字段
 ```
+
+这套推断现在只在 `pnpm convert:pet` 迁移时执行一次。迁移结果写进
+`assets-src/pet/vup.json`，每段动画的 `source / type / name / mood / segment / layer`
+以及每帧文件和时长都显式保存；日常构建不再靠路径重新推断。
 
 **动作类型 AnimatType**（原版 `enum AnimatType { Single, A_Start, B_Loop, C_End }`）：
 
@@ -29,7 +33,7 @@
 
 **四套心情目录**：每种类型下按 `Happy / Nomal / PoorCondition / Ill` 分目录，对应 Core 的 `mood`（[03 §3](03-core.md)：健康 < 25 → Ill；体力 < 20 或心情 < 40 → PoorCondition；心情 ≥ 70 → Happy）。请求的心情没有时按 `happy → nomal → poorcondition → ill` 降级找最近的（原版 `FindGraphs` 同样如此）。
 
-**夹心动画**（吃 / 喝 / 收礼 / 吃药）：`back_lay`（宠物本体）→ 食物精灵 → `front_lay`（手）。`info.lps` 的 `FoodAnimation#eat:|a0#时长,x,y,宽,旋转,不透明度` 是食物的轨迹；前后两层帧数不同但总时长相同，播放器用**一个时钟**反查各层帧号，不会漂移。手在食物前面——层序错了就穿帮。
+**夹心动画**（吃 / 喝 / 收礼 / 吃药）：`back_lay`（宠物本体）→ 食物精灵 → `front_lay`（手）。`vup.json.layered[].food` 保存逐段 `{ms,x,y,width,rotate,opacity}` 轨迹（迁自原版 `info.lps` 的 `FoodAnimation`）；前后两层帧数不同但总时长相同，播放器用**一个时钟**反查各层帧号，不会漂移。手在食物前面——层序错了就穿帮。
 
 ## 2. 播放器 `AnimationPlayer`
 
@@ -52,9 +56,9 @@ Core 定活动，Body 按这棵树挑画面：
 ├─ 当前计划（Core 定活动，Body 在池里轮换，animationPool.ts）
 │   ├─ Work  → 写文案 8–15 min · 清屏 5–10 · 直播 10–20 · 烧烤 6–12 · 修屏幕 6–12
 │   ├─ Study → 看书 8–15 · 写字 6–12 · 研究 6–12 · 画画 8–15
-│   ├─ Play  → 打游戏 6–12 · 删错误 5–10 · 跳绳 3–6 · 玩水 5–10
+│   ├─ Play  → 打游戏 6–12 · 删错误 5–10 · 跳绳 3–6 · 玩水 5–10 · 网球 / 舞蹈 4–8
 │   └─ Sleep → 入睡（A）· 熟睡（B 随机变体）· 醒来（C）
-└─ 无任务（Idle）→ 发呆（default）· 四处看 / 小动作（idel，15–40 s 一次）· 走路 / 爬墙 / 坠落（pet_motion）
+└─ 无任务（Idle）→ 发呆（default）· StateONE → StateTWO 成对待机 · 四处看 / 小动作（idel，15–40 s 一次）· 走路 / 爬墙 / 坠落（pet_motion）
 ```
 
 - **每段池动画有自己的驻留时长**（表里的分钟区间随机抽）。驻留没到**不因轮换而换**；到了就在同池里随机换一个**不同的**。刚进活动优先播 Core 指名的（`action.graph`）。
@@ -66,12 +70,16 @@ Core 定活动，Body 按这棵树挑画面：
 
 | 输入 | 表现 |
 |---|---|
-| 摸头 / 摸身（`vup.lps` 的 touchhead / touchbody 区域） | `touch_head` / `touch_body` 三段式一遍，回到当前活动 |
+| 摸头 / 摸身（`vup.json.profile` 的 touchhead / touchbody 区域） | `touch_head` / `touch_body` 三段式一遍，回到当前活动 |
 | 按住拖动 | `raised_dynamic` 挣扎三次 → `raised_static`；窗口在 Rust 侧跟随物理光标；松手落地 |
 | 松手出屏 | 不到侧挂份上的一律**弹回**当前显示器（头顶区可以在屏幕外，身体不行） |
 | 拖过左 / 右边 50 逻辑像素 | 侧挂：`sidehide_*_main` A→B；hover 播 `rise`；按下播 main C 并完整回到屏幕 |
 | 真正空闲 | 按原版 16 条 `move` 规则走路 / 爬行 / 爬墙 / 顶部移动 / 坠落；位移在 Core 50 ms 轮询里按规则 Interval 推，每步做边界检查 |
 | 说话（TTS 在放） | 循环 `say`；一次性动画播完再接；提起时不说话 |
+| 启动 / 托盘退出 | `startup` 一次；退出先播 `shutdown`，完成后才结束进程（8 s 超时兜底） |
+| 等模型首字 | `common/think` A → B 循环；首字、取消或失败时播 C 回当前活动 |
+| 升级 / 心情变化 | `common/levelup`；心情上升 `switch_up`、下降 `switch_down` |
+| 进入吃 / 喝 | 先播 `switch_hunger` / `switch_thirsty`，再接夹心动画；吃药不误播饥饿 |
 | 单击 / `Alt+V` | 打开对话窗口 |
 
 **穿透**：不用原版的矩形，用当前帧 alpha。Core 每 16 ms 读光标、查掩码，只在结果变化时切 `ignore_cursor_events`；掩码没到、位置读不到一律**不穿透**（穿透错了她就再也点不着）。交互期间 `set_hit_test_pinned(true)` 钉住。头顶区永远穿透。
@@ -86,12 +94,28 @@ Core 定活动，Body 按这棵树挑画面：
 ## 6. 资产管线 `scripts/build-assets.mjs`
 
 ```
-assets-src/pet/vup/**  ──→  apps/desktop/public/pet/
-  ├─ 移植 GraphInfo 的路径解析 + 30 行 LPS 解析器（info.lps 覆盖字段）
-  ├─ vup.lps → pet.json（touchhead / touchbody / raisepoint / work / 16 条 move 规则 / 侧挂锚点）
-  ├─ food/*.lps + image/ → manifest.food（123 项：饱腹 / 水 / 心情 / 健康 / 价格；图转 128 px WebP）
-  ├─ sharp：1000×1000 PNG → 500×500 WebP（q85）   836 MB → ~80 MB
-  └─ manifest.json：609 clips / 6181 帧；index[type/name/mood/animat] → clip ids
+一次迁移（pnpm convert:pet）
+  vup.lps + vup/**/info.lps + 目录路径
+    └─ GraphInfo 规则只推断一次
+       └─ assets-src/pet/vup.json
+          ├─ profile：触摸 / 提起 / work / 16 条 move / 侧挂锚点
+          ├─ animations：659 段；type / name / mood / segment / layer
+          ├─ frames：6875 个 PNG 文件名与 ms
+          └─ layered：12 条前层 / 后层 / 食物轨迹，全部可用（喝水 Happy / PoorCondition 复用 Nomal 手部前层）
+
+一次迁移（pnpm convert:food）
+  food/*.lps ──→ assets-src/food/food.json
+                  ├─ gifts 20 · foods 66 · drinks 27 · medicines 10
+                  └─ 图片路径 · 营养 · 价格 · 健康 · 描述 · 原始来源
+
+日常构建（pnpm build:assets）
+  vup.json + vup/**/*.png ──→ WebP + pet.json + manifest.json
+  food.json + image/*.png ──→ manifest.food + Core food-catalog.json（123 项；图转 128 px WebP）
 ```
 
-`assets-src/` 与 `public/pet/` 都不入库；美术归原作者，个人使用。
+`vup.json` 是后续优化动画归类的编辑入口，结构见
+`schemas/pet-source-v1.schema.json`；食物结构见 `schemas/food-source-v1.schema.json`。构建会拒绝未知 type / mood / segment、越界相对路径、
+空动画以及不存在的帧；重新运行 `convert:pet` 会从原版 LPS 覆盖它，所以手工调整前应确认是否要重迁移。
+
+`assets-src/` 中的 PNG / LPS 与生成的 `public/pet/` 不入库；只提交不含图片的
+`assets-src/pet/vup.json`、`assets-src/food/food.json` 映射与 Schema，让后续动画 / 食物归类优化能正常 review、回滚和发布。

@@ -15,7 +15,7 @@ VPet.Core（Rust，apps/desktop/src-tauri/src）
 │   ├── intent           （规则意图：中英文的使唤 / 番茄钟 / 提醒）
 │   ├── scheduler        （计时器 · 专注段）
 │   ├── pomodoro         （番茄钟相位机）
-│   ├── food             （食物货架：吃什么 · 药单）
+│   ├── food             （JSON 货架：按需求随机吃喝 · 礼物 · 药单）
 │   ├── memory · embed   （长期记忆 · 语义向量）
 │   ├── db               （SQLite：状态流水 · 记忆 · 向量 · 计时器）
 │   └── tools            （工具注册 · 权限门 · 审计）
@@ -42,10 +42,15 @@ VPet.Shared（packages/shared，zod）
 └── PetState · ActionRef · Verdict · Manifest · Memory   （TS 与 Rust 共用的 JSON 契约）
 
 scripts/
-├── build-assets.mjs     （原版 PNG → WebP + manifest；移植 GraphInfo 解析）
+├── build-assets.mjs     （convert:pet / convert:food：LPS → JSON；build:assets：JSON + PNG → WebP / manifest / Core 货架）
 ├── start-vpet.ps1       （拉起 Ollama · tts-server · 桌宠）
+├── make-shortcut.ps1    （桌面「VPet 桌宠」快捷方式 → start-vpet.ps1，不复制 exe）
 ├── setup-tts.ps1        （编译 qwentts.cpp、下载权重，一次性）
 └── release.ps1 · publish-release.ps1 · clean.ps1
+
+schemas/
+├── pet-source-v1.schema.json  （vup.json：角色 profile · 动画映射 · 帧时长 · 夹心轨迹）
+└── food-source-v1.schema.json （food.json：礼物 · 食物 · 饮料 · 药物）
 ```
 
 ## 2. 边界规则
@@ -69,7 +74,7 @@ Body → Core（`invoke`，节选）：
 | 声音 | `tts_speak` `tts_status` `list_actions` `draft_action_lines` |
 | 记忆 | `remember` `forget_memory` `search_memory` `memory_context` `list_memories` `pin_memory` `memory_health` `rebuild_embeddings` |
 | 偏好 / 工具 | `set_bias` `clear_bias` `list_biases` `list_tools` `run_tool` `recent_audit` |
-| 窗口 | `set_hit_mask` `set_hit_test_pinned` `begin_pet_drag` `end_pet_drag` `pet_motion::*` `open_chat` `open_settings_panel` |
+| 窗口 | `set_hit_mask` `set_hit_test_pinned` `begin_pet_drag` `end_pet_drag` `pet_motion::*` `open_chat` `open_settings_panel` `request_shutdown` `finish_shutdown` |
 
 Core → Body（`emit`）：
 
@@ -80,6 +85,8 @@ Core → Body（`emit`）：
 | `pet:said` | `Verdict` | 一次服从判定的结果 |
 | `pet:gift` | `{id, name}` | 收到礼物，拆一遍 |
 | `pet:motion` | 移动指令 | 自主走路 / 爬墙 / 侧挂 |
+| `pet:shutdown-requested` | — | 托盘退出：Body 播退场后回调 `finish_shutdown`；Core 8 秒兜底 |
+| `chat:thinking` | `{requestId, active}` | 模型首字前开始 / 取消或失败时结束思考动画 |
 | `chat-stream` | `{requestId, delta, done, reset?}` | 对话流式输出 |
 | `focus:started` / `focus:ended` / `timer:fired` | 计时器 | 头顶倒计时、到点提醒 |
 | `pomodoro:tick` / `pomodoro:phase` | 番茄钟 | 相位推进 |
@@ -89,9 +96,9 @@ Core → Body（`emit`）：
 
 **心跳**（每秒，`spawn_pet_clock`）：按墙上时钟算这一拍多长（待机醒来补算，封顶 120 分钟）→ `reduce(Tick)` → 换了件事就 `lines::announce` → 跨过病线就说一句 → `pet:state`。
 
-**你说话**：对话窗 → `send_chat_message` → `intent::parse`（规则）→ 认出使唤就 `request_action`（服从判定）/ 番茄钟 / 计时器 / 偏好 → 结果写进系统提示「此刻」和用户消息后的 `[旁白]` → Ollama 流式 → `chat-stream` → 气泡 + 按句 TTS。模型**不能**自己改状态。
+**你说话**：对话窗 → `send_chat_message` → `intent::parse`（规则）→ 认出使唤就 `request_action`（服从判定）/ 番茄钟 / 计时器 / 偏好 → 结果写进系统提示「此刻」和用户消息后的 `[旁白]` → `chat:thinking` 播思考 → Ollama 首字结束思考 → `chat-stream` → 气泡 + 按句 TTS。模型**不能**自己改状态。
 
-**你照顾她**：托盘 / 面板 → `give_gift` / `give_medicine` → `Event::Gifted` / `Event::Medicated` → 动作切到收礼 / 吃药（夹心动画）→ 台词。
+**你照顾她**：托盘「送她礼物」→ 面板礼品页选定 id → `give_gift`；喂药走 `give_medicine`。两者再进 `Event::Gifted` / `Event::Medicated` → 收礼 / 吃药夹心动画 → 台词。
 
 ## 5. 数据与目录
 
