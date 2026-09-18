@@ -14,12 +14,14 @@ export const DEFAULT_PET_STATE: PetState = {
   exp: 0,
   level: 0,
   affection: 50,
+  health: 100,
+  remedy: 0,
   action: null,
   updatedAt: 0,
 }
 
 /**
- * 活动 → 该活动待机时循环播放的动画（docs/05 §3）。
+ * 活动 → 该活动待机时循环播放的动画（docs/04 §3）。
  *
  * 这只是兜底：Core 的动作表会在 `state.action.graph` 里指明具体播哪段
  * （同是 working，文案 是 workone、修屏幕 是 fixmenu），那个优先。

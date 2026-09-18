@@ -1,4 +1,4 @@
-//! 服从判定（docs/07 roadmap 2.8）。
+//! 服从判定（docs/03 §5）。
 //!
 //! 用户让她做一件事，她**不一定照做**。这是「有身体的角色」和「遥控车」的分界线：
 //! 遥控车收到指令就执行；人会先掂量一下——我现在饿不饿、心情好不好、跟你熟不熟、
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use super::actions::ActionDef;
 use super::state_machine::{
-    meets, PetState, EXHAUSTED, HUNGRY, MISERABLE, SAD, STARVING, THIRSTY,
+    bedridden, meets, PetState, EXHAUSTED, HUNGRY, MISERABLE, SAD, SICK_HEALTH, STARVING, THIRSTY,
 };
 
 /* --- 参数。全是「策略」，集中在这里方便调手感 --- */
@@ -62,6 +62,8 @@ pub enum Refusal {
     Thirsty,
     Tired,
     Sad,
+    /// 病着呢（健康低于 `SICK_HEALTH`）。病重时正事直接是 Impossible 那一档
+    Sick,
     /// 没有哪一项特别突出，就是不太想
     Reluctant,
 }
@@ -76,6 +78,7 @@ impl Refusal {
             Refusal::Thirsty => "我先喝口水，马上就去。",
             Refusal::Tired => "我有点累了，让我歇一会儿嘛。",
             Refusal::Sad => "我现在心情不太好……等下再说好不好。",
+            Refusal::Sick => "我不太舒服……让我躺一会儿吧。",
             Refusal::Reluctant => "唔……我不太想动，就一会儿。",
         }
     }
@@ -145,9 +148,13 @@ pub fn judge(a: &ActionDef, s: &PetState, pressure: f32, roll: f32) -> Verdict {
     if !meets(a, s) {
         return Verdict::refused(&a.name, Refusal::Impossible, 0.0);
     }
+    // 病重了不是「不想」，是干不动：不掷骰子
+    if bedridden(a, s) {
+        return Verdict::refused(&a.name, Refusal::Sick, 0.0);
+    }
 
-    // 四个维度：现在多急 × 这件事有多帮不上忙 × 权重
-    let dims: [(Refusal, f32, f32, f32); 4] = [
+    // 五个维度：现在多急 × 这件事有多帮不上忙 × 权重
+    let dims: [(Refusal, f32, f32, f32); 5] = [
         (
             Refusal::Hungry,
             urgency(s.hunger, HUNGRY),
@@ -172,6 +179,13 @@ pub fn judge(a: &ActionDef, s: &PetState, pressure: f32, roll: f32) -> Verdict {
             urgency(s.feeling, SAD),
             relief(a.per_min.feeling, a.duration, SAD),
             0.8,
+        ),
+        (
+            // 病着的时候只有躺下算「对症」；越接近病重越不想动
+            Refusal::Sick,
+            urgency(s.health, SICK_HEALTH),
+            if a.has_tag("rest") { 1.0 } else { 0.0 },
+            1.2,
         ),
     ];
 

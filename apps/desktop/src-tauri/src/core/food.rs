@@ -55,6 +55,25 @@ impl FoodShelf {
             .cloned().collect()
     }
 
+    /// 能喂的药：`Drug` 类，去掉白送的「太阳系」（价格 0、体力 −100，原版救存档用的彩蛋）
+    pub fn medicines(&self) -> Vec<FoodItem> {
+        self.items.iter().filter(|f| f.kind == "Drug" && f.price > 0.0).cloned().collect()
+    }
+
+    /// 缺 `deficit` 点健康时该喂哪一种：刚好够补上的里面挑最便宜的；
+    /// 没有一种够的话就挑最猛的。贵的不浪费，便宜的不够用
+    pub fn remedy_for(&self, deficit: f32) -> Option<&FoodItem> {
+        let drugs: Vec<&FoodItem> = self.items.iter().filter(|f| f.kind == "Drug" && f.price > 0.0).collect();
+        let enough = drugs.iter().copied().filter(|f| f.health >= deficit).min_by(|a, b| {
+            a.price.partial_cmp(&b.price).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        enough.or_else(|| {
+            drugs.iter().copied().max_by(|a, b| {
+                a.health.partial_cmp(&b.health).unwrap_or(std::cmp::Ordering::Equal)
+            })
+        })
+    }
+
     pub fn set(&mut self, items: Vec<FoodItem>) {
         self.items = items;
     }
@@ -117,6 +136,20 @@ fn score(f: &FoodItem, need: Need) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 药单去掉太阳系_按缺口挑药() {
+        let shelf = FoodShelf::bundled();
+        let meds = shelf.medicines();
+        assert_eq!(meds.len(), 9, "十种药去掉白送的太阳系");
+        assert!(meds.iter().all(|m| m.price > 0.0 && m.strength >= 0.0));
+        // 缺 30：够补的里面最便宜的是 大力丸（50 / 94），不是更贵的布洛芬（35 / 116）；
+        // 缺 5：维生素C含片（10 / 16.5）
+        assert_eq!(shelf.remedy_for(30.0).unwrap().name, "大力丸");
+        assert_eq!(shelf.remedy_for(5.0).unwrap().name, "维生素C含片");
+        // 缺 90 没有一种够，挑最猛的
+        assert_eq!(shelf.remedy_for(90.0).unwrap().name, "速效救心丸");
+    }
 
     #[test]
     fn bundled_gifts_available_before_webview_starts() {

@@ -1,4 +1,4 @@
-//! 番茄钟（docs/07 roadmap 2.4、docs/03 §7）。
+//! 番茄钟（docs/03 §7）。
 //!
 //! 相位机：专注 → 短休 → 专注 → … → 每 N 个长休。和计时器一样不自己读时钟，
 //! 时间从外面喂进来，所以「第四个番茄钟之后是不是长休」能在测试里瞬间验证。
@@ -26,7 +26,7 @@ impl Phase {
     }
 }
 
-/// 节奏。默认 25/5/15、四个一轮，可以改（docs/02 L0「可配置节奏」）
+/// 节奏。默认 25/5/15、四个一轮，可以改（docs/03 §7）
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Rhythm {

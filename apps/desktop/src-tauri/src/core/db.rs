@@ -1,4 +1,4 @@
-//! 本地存储（docs/07 roadmap 2.1）。
+//! 本地存储（docs/06-roadmap.md）。
 //!
 //! 迁移用 SQLite 自带的 `user_version`：`MIGRATIONS` 是一个只增不改的数组，
 //! 下标就是版本号，启动时把还没跑过的依次跑掉。不引迁移框架，二十行够了。
@@ -14,7 +14,7 @@ use super::state_machine::Pet;
 /// 只能往后追加，**永远不要改已有的条目**——老库已经按旧内容跑过了
 const MIGRATIONS: &[&str] = &[
     // v1：宠物状态流水。存成日志而不是单行，是为了以后能看趋势
-    //（docs/07 的 pet_state_log），也为「连续 N 天状态差」这类判断留路。
+    //（状态流水 pet_state_log），也为「连续 N 天状态差」这类判断留路。
     r#"
     CREATE TABLE pet_state_log (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +31,7 @@ const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     "#,
-    // v3：长期互动记忆（docs/07 roadmap 2.11）。
+    // v3：长期互动记忆（docs/05 §3）。
     //
     // 这张表**是真相来源**，所以每个字段都摊开成列，不像 `kv` 那样塞 JSON——
     // 记忆要按 status 过滤、按 expires_at 扫、按 importance 排、逐条删，
@@ -190,7 +190,7 @@ impl Db {
             .optional()
     }
 
-    /* ---------- 长期记忆（docs/07 roadmap 2.11） ---------- */
+    /* ---------- 长期记忆（docs/05 §3） ---------- */
 
     /// 写一条。id 冲突就整条覆盖——`plan_write` 已经决定了是新增还是更新，
     /// 「更新」在那边就是把旧 id 原样带回来，所以这里一个 upsert 够了
@@ -747,6 +747,8 @@ mod tests {
                 exp: 900.0,
                 level: 3,
                 affection: 63.5,
+                health: 58.0,
+                remedy: 12.0,
                 action: None,
                 updated_at: 1_700_000_000_000,
             },

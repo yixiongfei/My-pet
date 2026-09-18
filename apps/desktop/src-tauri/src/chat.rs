@@ -439,7 +439,15 @@ pub fn describe_state(s: &PetState) -> String {
         level_word(s.hunger, "吃得饱饱的", "不太饿", "有点饿", "饿得不行"),
         level_word(s.thirst, "不渴", "不太渴", "有点渴", "渴得要命"),
     ];
-    format!("{doing}{mood}，{}，{}，{}。", body[0], body[1], body[2])
+    // 健康只在不对劲时提：健康的人不会逢人就说自己没病
+    let health = if s.health < crate::core::state_machine::ILL_HEALTH {
+        "，病得很重，正事都干不动，需要用户喂药才能好"
+    } else if s.health < crate::core::state_machine::SICK_HEALTH {
+        "，身体不太舒服（生病了），需要用户喂药才能好起来"
+    } else {
+        ""
+    };
+    format!("{doing}{mood}，{}，{}，{}{health}。", body[0], body[1], body[2])
 }
 
 fn system_prompt(settings: &ChatSettings, memories: &str, now: &Situation) -> String {
@@ -786,6 +794,7 @@ fn handle_intent(app: &AppHandle, i: &Intent) -> (String, Option<String>) {
                         Some(crate::core::obey::Refusal::Thirsty) => "你很渴",
                         Some(crate::core::obey::Refusal::Tired) => "你太累了",
                         Some(crate::core::obey::Refusal::Sad) => "你心情不好",
+                        Some(crate::core::obey::Refusal::Sick) => "你生病了，不舒服",
                         _ => "你不太想",
                     };
                     let note = format!(

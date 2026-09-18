@@ -3,7 +3,7 @@
 //! 目前这里负责：宠物窗口的摆位与托盘、鼠标穿透的 alpha 命中判定、全局快捷键，
 //! 以及 `core/state_machine.rs` 的状态机和驱动它的心跳——数值随时间走、饿了自己去吃，
 //! 状态落在 `core/db.rs` 的 SQLite 里，重启能接着上次继续。
-//! 调度 / 番茄钟 / 工具 / 权限还没做，见 docs/03-architecture.md §3 与 docs/07 Phase 2。
+//! 调度 / 番茄钟 / 工具 / 权限还没做，见 docs/02-components.md 与 docs/06-roadmap.md。
 
 mod core;
 mod desktop_settings;
@@ -46,7 +46,7 @@ const PET_WINDOW: &str = "pet";
 const PANEL_WINDOW: &str = "panel";
 const CHAT_WINDOW: &str = "chat";
 
-/// 呼出输入框的全局快捷键（docs/05 §4 的默认值，Q 待确认）
+/// 呼出输入框的全局快捷键（docs/04 §4 的默认值，Q 待确认）
 const PROMPT_SHORTCUT: &str = "Alt+V";
 
 /// 命中掩码的边长，必须与前端 body/hitMask.ts 的 N 一致
@@ -57,7 +57,7 @@ const PET_LOGICAL_SIZE: f64 = 500.0;
 /// 这一块永远穿透（气泡不可点），命中判定和拖拽锚点都只按下面那个正方形算。
 /// **前端 PetCanvas.tsx 有同名常量，改要一起改**
 pub(crate) const HEAD_ROOM: f64 = 0.6;
-/// 光标轮询间隔（docs/05 §4）
+/// 光标轮询间隔（docs/04 §4）
 const POLL: Duration = Duration::from_millis(16);
 
 /// 状态推进的节拍。一秒一次，数值按 1/60 分钟走——比每分钟一跳平滑，
@@ -144,6 +144,7 @@ fn debug_patch_pet_state(
     thirst: Option<f32>,
     money: Option<f32>,
     affection: Option<f32>,
+    health: Option<f32>,
 ) {
     apply(
         &app,
@@ -154,8 +155,21 @@ fn debug_patch_pet_state(
             thirst,
             money,
             affection,
+            health,
         },
     );
+}
+
+/// 刚跨过病线就说一句。这是「需要用户」的那一环：不开面板的人也得知道她病了
+fn notice_sickness(app: &AppHandle, before: &PetState, after: &PetState) {
+    use core::state_machine::{ILL_HEALTH, SICK_HEALTH};
+    if before.health >= SICK_HEALTH && after.health < SICK_HEALTH {
+        lines::say(app, "sick", "……我好像有点不舒服。");
+    } else if before.health >= ILL_HEALTH && after.health < ILL_HEALTH {
+        lines::say(app, "sick", "头好晕……我什么都干不动了。");
+    } else if before.health < SICK_HEALTH && after.health >= SICK_HEALTH {
+        lines::say(app, "sick", "好多了！谢谢你照顾我。");
+    }
 }
 
 /// 把事件喂给状态机，落到共享状态，然后广播给 Body
@@ -171,10 +185,12 @@ fn apply_with(app: &AppHandle, event: &Event, quiet: bool) {
     let Ok(shelf) = shelf.read() else { return };
     let pet = app.state::<Mutex<Pet>>();
     let Ok(mut st) = pet.lock() else { return };
+    let before = st.state.clone();
     let mut next = reduce(&cat, &shelf, &st, event);
     next.state.updated_at = now_ms();
     *st = next.clone();
     drop(st);
+    notice_sickness(app, &before, &next.state);
     // 服从判定的那一句话跟状态分开发：它是「她说的」，不是「她的数值」
     if let Some(v) = next.last_verdict.as_ref() {
         log::info!(
@@ -252,6 +268,7 @@ fn spawn_pet_clock(app: AppHandle) {
             next.state.updated_at = now;
             *st = next.clone();
             drop(st);
+            notice_sickness(&app, &before, &next.state);
 
             let acted = next.state.action.as_ref().map(|a| a.id.as_str());
             let acted_before = before.action.as_ref().map(|a| a.id.as_str());
@@ -983,7 +1000,7 @@ fn list_biases(app: AppHandle) -> Vec<BiasView> {
     pet.lock().map(|p| p.biases.list()).unwrap_or_default()
 }
 
-/// 唯一的工具入口（docs/03 §5）。
+/// 唯一的工具入口（docs/03 §8）。
 ///
 /// 顺序是固定的：查工具 → 过权限门 → 执行 → 落审计。**审计一定要落**，
 /// 哪怕被拒绝了——「她想做但没让做」和「她做了」一样重要。
@@ -1004,7 +1021,7 @@ fn run_tool(app: AppHandle, call: ToolCall) -> ToolResult {
 
     let result = match decision {
         Decision::Deny => ToolResult::err(&call.call_id, "denied", "这件事没有授权"),
-        // Ask 的确认气泡是 Phase 3 的 UX（docs/03 §6）。在那之前一律当拒绝处理，
+        // Ask 的确认气泡是 Phase 3 的 UX（docs/03 §8）。在那之前一律当拒绝处理，
         // 宁可少做也不要在用户没点头的情况下动手
         Decision::Ask => {
             let _ = app.emit("tool:confirm", &call.name);
@@ -1369,6 +1386,43 @@ fn give_gift(app: AppHandle, id: Option<String>) -> Result<String, String> {
     Ok(name)
 }
 
+/// 面板喂药要看的药单：原版的十种药，去掉白送的「太阳系」（体力 −100，那是救存档的彩蛋）
+#[tauri::command]
+fn list_medicines(shelf: State<'_, RwLock<FoodShelf>>) -> Result<Vec<FoodItem>, String> {
+    shelf.read().map(|s| s.medicines()).map_err(|_| "货架正忙，请稍后再试".into())
+}
+
+/// 用户喂她一样药。不指定就挑「刚好够把缺口补上」的那一种——贵的不浪费，便宜的不够用。
+/// 没病时喂药她会说不用：健康的人吃药不是照顾，是浪费
+#[tauri::command]
+fn give_medicine(app: AppHandle, id: Option<String>) -> Result<String, String> {
+    use core::state_machine::SICK_HEALTH;
+    let snap = pet_snapshot(&app);
+    if snap.health + snap.remedy >= 100.0 {
+        lines::say(&app, "medicine", "我没生病呀，不用吃药。");
+        return Err("她现在很健康，不用吃药".into());
+    }
+    let shelf = app.state::<RwLock<FoodShelf>>();
+    let picked = {
+        let s = shelf.read().map_err(|_| "货架正忙，请稍后再试")?;
+        let item = match id.as_deref() {
+            Some(id) => s.get(id).filter(|f| f.kind == "Drug"),
+            None => s.remedy_for(100.0 - snap.health - snap.remedy),
+        };
+        item.map(|f| (f.id.clone(), f.name.clone()))
+    };
+    let (id, name) = picked.ok_or("没有找到这种药")?;
+    log::info!("喂药：{name}（健康 {:.0}）", snap.health);
+    apply(&app, &Event::Medicated { id, name: name.clone() });
+    if let Some(a) = pet_snapshot(&app).action.as_ref().filter(|a| a.id == "medicine") {
+        lines::announce(&app, a, true);
+    }
+    if snap.health >= SICK_HEALTH {
+        log::info!("没到病线也喂了药，当补品吃");
+    }
+    Ok(name)
+}
+
 /* ==================== 语音与台词 ==================== */
 
 /// 合成一句话，返回 WAV 字节。Body 拿去播。`mood` 不给就按她此刻的心情挑语气
@@ -1565,6 +1619,8 @@ pub fn run() {
             set_food_catalog,
             give_gift,
             list_gifts,
+            give_medicine,
+            list_medicines,
             tts_speak,
             tts_status,
             list_actions,
@@ -1669,13 +1725,14 @@ fn place_bottom_right(win: &WebviewWindow) {
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "显示 / 隐藏", true, None::<&str>)?;
-    // 穿透在 Windows 上是有坑的一项（docs/07 风险表），留个能当场关掉的开关
+    // 穿透在 Windows 上是有坑的一项（docs/06 风险表），留个能当场关掉的开关
     let passthrough = CheckMenuItem::with_id(app, "passthrough", "鼠标穿透", true, true, None::<&str>)?;
     let panel = MenuItem::with_id(app, "panel", "面板", true, None::<&str>)?;
     let chat = MenuItem::with_id(app, "chat", "和她聊聊…", true, None::<&str>)?;
     let gift = MenuItem::with_id(app, "gift", "送她礼物", true, None::<&str>)?;
+    let medicine = MenuItem::with_id(app, "medicine", "喂她吃药", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&toggle, &chat, &panel, &gift, &passthrough, &quit])?;
+    let menu = Menu::with_items(app, &[&toggle, &chat, &panel, &gift, &medicine, &passthrough, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .menu(&menu)
@@ -1689,6 +1746,9 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "gift" => {
                 if let Err(e) = give_gift(app.clone(), None) { log::warn!("送礼失败：{e}"); }
+            }
+            "medicine" => {
+                if let Err(e) = give_medicine(app.clone(), None) { log::info!("没喂成药：{e}"); }
             }
             "passthrough" => toggle_passthrough(app),
             "quit" => app.exit(0),
@@ -1715,7 +1775,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// 每 POLL 读一次光标，压在宠物不透明像素上就关掉穿透，否则打开
-/// （docs/05 §4 的 alpha 命中）。跑在后台线程，只在判定结果变化时才去动窗口。
+/// （docs/04 §4 的 alpha 命中）。跑在后台线程，只在判定结果变化时才去动窗口。
 fn spawn_hit_test(app: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(POLL);

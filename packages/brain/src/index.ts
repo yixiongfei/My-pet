@@ -1,7 +1,7 @@
 /**
  * @vpet/brain —— Agent 编排层（Phase 3 起实现）。
  *
- * 约束（docs/03-architecture.md §2）：
+ * 约束（docs/02-components.md）：
  *  - 零 React / DOM 依赖，可迁到 sidecar 或 Rust
  *  - 不持有计时、状态、权限逻辑；调用工具的唯一方式是 Core 的 `run_tool`
  *  - 被动运行：只被用户输入或 Core 的 `agent:trigger` 唤醒

@@ -45,6 +45,13 @@ export const PetState = z.object({
    * 决定她有多大概率听你的话：今天心情差可以不听，但关系好的话拒绝得更软
    */
   affection: z.number().min(0).max(100),
+  /**
+   * 健康。慢变量：饿着 / 渴着 / 累着（< 30）往下掉，什么都不缺时慢慢养；
+   * 掉到 50 以下就养不回来了，得用户喂药。< 25 是 Ill，动画换成生病那套
+   */
+  health: z.number().min(0).max(100).default(100),
+  /** 还没吸收完的药效（健康点数），按分钟慢慢起作用 */
+  remedy: z.number().min(0).default(0),
   action: ActionRef.nullish(),
   updatedAt: z.number().int(),
 })
@@ -65,6 +72,8 @@ export const Refusal = z.enum([
   /** 压根没有这件事可做 */
   'unknown',
   'hungry', 'thirsty', 'tired', 'sad',
+  /** 病着呢（健康 < 50）；病重时正事直接不掷骰子 */
+  'sick',
   /** 没有哪项特别突出，就是不太想 */
   'reluctant',
 ])

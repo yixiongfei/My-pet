@@ -1,4 +1,4 @@
-//! 工具层：Brain 能对这个系统做的全部事情（docs/03 §5–6、roadmap 2.5）。
+//! 工具层：Brain 能对这个系统做的全部事情（docs/03 §8）。
 //!
 //! 这一层存在的理由是**收窄**，不是方便。Phase 3 的 LLM 只能通过 `run_tool` 动这个
 //! 系统：每次调用先过权限门，再执行，最后落一条审计。LLM 拿不到别的入口。
@@ -30,7 +30,7 @@ pub enum Decision {
 }
 
 /// 调用是用户直接要求的，还是她自己主动发起的。
-/// 主动发起的权限门槛更高——docs/03 §6
+/// 主动发起的权限门槛更高——docs/03 §8
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Origin {
@@ -135,7 +135,7 @@ impl PermissionGate {
         &self.grants
     }
 
-    /// docs/03 §6 的判定顺序：
+    /// docs/03 §8 的判定顺序：
     /// 身体机能直接放行 → 查最具体的授权 → 默认表（读/写 = 问，执行 = 拒）
     /// → 主动发起的把 Allow 降成 Ask（只读除外）
     pub fn check(&self, tool: &ToolDef, origin: Origin) -> Decision {

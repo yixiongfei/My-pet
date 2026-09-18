@@ -1,4 +1,4 @@
-//! 宠物状态机（docs/03 §7、docs/05 §5）。
+//! 宠物状态机（docs/03 §1–3）。
 //!
 //! 三层分工，谁都不越界：
 //!
@@ -93,12 +93,24 @@ pub struct PetState {
     /// 50 是中性起点：她本来就是「女儿」，关系不从零开始
     #[serde(default = "default_affection")]
     pub affection: f32,
+    /// 健康 0–100。**慢变量**：饿着 / 渴着 / 累着（低于 `UNWELL`）时往下掉，
+    /// 什么都不缺时慢慢养回来；掉到 `SICK_HEALTH` 以下就养不回来了，得喂药。
+    /// 它和心情分开——心情是「今天过得好不好」，健康是「这段日子有没有被照顾」
+    #[serde(default = "default_health")]
+    pub health: f32,
+    /// 还没吸收完的药效（健康点数）。药不是一口见底，按 `REMEDY_PER_MIN` 慢慢起作用
+    #[serde(default)]
+    pub remedy: f32,
     pub action: Option<ActionRef>,
     pub updated_at: i64,
 }
 
 fn default_affection() -> f32 {
     50.0
+}
+
+fn default_health() -> f32 {
+    100.0
 }
 
 impl Default for PetState {
@@ -114,6 +126,8 @@ impl Default for PetState {
             exp: 0.0,
             level: 0,
             affection: default_affection(),
+            health: default_health(),
+            remedy: 0.0,
             action: None,
             updated_at: 0,
         }
@@ -211,6 +225,9 @@ pub enum Event {
     Pin(Option<String>),
     /// 用户送了样东西。她自己不会凭空收到礼物，所以这条只能从外面来
     Gifted { id: String, name: String },
+    /// 用户喂了她一样药（货架上 `Drug` 类）。她自己不会去买药——病了得有人照顾，
+    /// 这是「需要用户」的那一环
+    Medicated { id: String, name: String },
     /// 用户要求她做某件事。`target` 是动作 id 或 tag，`roll` 是外部喂的 0–1 随机数，
     /// `minutes` 是用户说的「做多久」（没说就按动作自己的时长）。
     /// **不保证执行**——要过 `obey::judge`
@@ -228,6 +245,7 @@ pub enum Event {
         thirst: Option<f32>,
         money: Option<f32>,
         affection: Option<f32>,
+        health: Option<f32>,
     },
 }
 
@@ -272,6 +290,28 @@ const RECOVERED_THIRST: f32 = 45.0;
 const HAPPY_FEELING: f32 = 70.0;
 const NOMAL_FEELING: f32 = 40.0;
 const POOR_STRENGTH: f32 = 20.0;
+
+/* --- 健康。比心情慢一个数量级：心情是今天，健康是这段日子 --- */
+
+/// 饱腹 / 口渴 / 体力低于这条线就在伤身体
+pub(crate) const UNWELL: f32 = 30.0;
+/// 健康低于这条线算病了：面板黄条、心情大幅往下掉、自己养不回来，得喂药
+pub(crate) const SICK_HEALTH: f32 = 50.0;
+/// 低于这条线是 Ill：动画换成生病那套，正事一律干不动
+pub(crate) const ILL_HEALTH: f32 = 25.0;
+/// 每一项缺口每分钟掉多少健康。三项全缺 0.15/min，五个多小时从满掉到病线；
+/// 只是上班累到 30 以下一两个小时，一天掉的还没养回来的多
+const HEALTH_LOSS: f32 = 0.05;
+/// 每一项缺口每分钟连带掉多少心情：饿着的时候不会开心
+const FEELING_UNWELL: f32 = 0.05;
+/// 病着的时候心情每分钟掉多少（一小时 12）。够「大幅」，也够让人看出来她不对劲
+const FEELING_SICK: f32 = 0.2;
+/// 什么都不缺、也没病时每分钟养回多少健康：一天回 30 左右，小磕小碰不用管
+const HEALTH_REGEN: f32 = 0.02;
+/// 药效每分钟吸收多少：一颗 65 的阿司匹林两个多小时见效完。「慢慢好转」
+const REMEDY_PER_MIN: f32 = 0.5;
+/// 病中被人喂药，关系往前推一大步——生病时谁在身边最记得住
+const AFFECTION_NURSED: f32 = 0.5;
 
 /* --- 好感度。慢变量，天级尺度 --- */
 
@@ -362,6 +402,33 @@ pub fn reduce(cat: &Catalog, shelf: &FoodShelf, p: &Pet, e: &Event) -> Pet {
                 n.earned = 0.0;
             }
         }
+        Event::Medicated { id, name } => {
+            let item = shelf.get(id);
+            // 药效进池子慢慢吸收；药自带的体力（钙片 +20）像买食物那样当场给
+            n.state.remedy += item.map(|i| i.health).unwrap_or(0.0).max(0.0);
+            n.state.strength += item.map(|i| i.strength).unwrap_or(0.0);
+            if n.state.health < SICK_HEALTH {
+                n.state.affection += AFFECTION_NURSED;
+            }
+            // 和收礼一样不走 decide：药是你喂的，不是她自己挑的。
+            // 借「吃」的夹心动画把药片送进嘴里
+            if let Some(a) = cat.get("medicine") {
+                n.state.activity = a.activity;
+                n.state.action = Some(ActionRef {
+                    id: a.id.clone(),
+                    name: a.name.clone(),
+                    graph: a.graph.clone(),
+                    reason: "你喂的药".into(),
+                    food: Some(FoodRef {
+                        id: id.clone(),
+                        name: name.clone(),
+                    }),
+                });
+                n.elapsed = 0.0;
+                n.earned = 0.0;
+            }
+            clamp(&mut n.state);
+        }
         Event::Pin(tag) => {
             n.pinned_tag = tag.clone();
             // 立刻换过去，不等下一拍。你刚让她做的事还在保护期里就先不动
@@ -405,9 +472,13 @@ pub fn reduce(cat: &Catalog, shelf: &FoodShelf, p: &Pet, e: &Event) -> Pet {
             thirst,
             money,
             affection,
+            health,
         } => {
             if let Some(v) = strength {
                 n.state.strength = *v;
+            }
+            if let Some(v) = health {
+                n.state.health = *v;
             }
             if let Some(v) = feeling {
                 n.state.feeling = *v;
@@ -483,6 +554,25 @@ fn tick(cat: &Catalog, shelf: &FoodShelf, n: &mut Pet, minutes: f32, hour: f32) 
     n.state.thirst += dt * minutes;
     n.state.feeling += df * minutes;
 
+    // 2.5 健康：饿着 / 渴着 / 累着都在伤身体，也连带心情；病了心情掉得更快。
+    //     什么都不缺、又没病，才慢慢养回来——病了靠自己养不好，得喂药（remedy）
+    let lacking = [n.state.hunger, n.state.thirst, n.state.strength]
+        .iter()
+        .filter(|v| **v < UNWELL)
+        .count() as f32;
+    if lacking > 0.0 {
+        n.state.health -= HEALTH_LOSS * lacking * minutes;
+        n.state.feeling -= FEELING_UNWELL * lacking * minutes;
+    } else if n.state.health >= SICK_HEALTH {
+        n.state.health += HEALTH_REGEN * minutes;
+    }
+    if n.state.health < SICK_HEALTH {
+        n.state.feeling -= FEELING_SICK * minutes;
+    }
+    let dose = n.state.remedy.min(REMEDY_PER_MIN * minutes);
+    n.state.health += dose;
+    n.state.remedy -= dose;
+
     let mult = earn_multiplier(&n.state);
     let money = current.earns.money * mult * minutes;
     let exp = current.earns.exp * mult * minutes;
@@ -557,7 +647,11 @@ fn should_switch(cat: &Catalog, n: &Pet, hour: f32) -> bool {
         return !cur.has_tag("need") && !cur.has_tag("sleep");
     }
     if n.state.feeling < MISERABLE {
-        return !cur.has_tag("cheer");
+        return !cur.has_tag("cheer") || bedridden(cur, &n.state);
+    }
+    // 病重了正事一律放下，去躺着
+    if bedridden(cur, &n.state) {
+        return true;
     }
     // 你刚让她做的事，保护期内只要还在做就别换
     if let Some(d) = n.directive.as_ref() {
@@ -628,6 +722,7 @@ pub fn decide_with_pin<'a>(
     // 正事和玩要「缓过来」才开始：门槛之上再留一段余量。吃喝睡不加——那是需要，不是选择
     let ok = |a: &ActionDef| {
         meets(a, s)
+            && !bedridden(a, s)
             && !cd.contains_key(&a.id)
             && (!SUPPRESSIBLE.iter().any(|t| a.has_tag(t)) || s.strength >= a.requires.min_strength + START_MARGIN)
     };
@@ -651,14 +746,14 @@ pub fn decide_with_pin<'a>(
         }
     }
     if s.feeling < MISERABLE {
-        if let Some(a) = best(cat, "cheer", |a| meets(a, s)) {
+        if let Some(a) = best(cat, "cheer", |a| meets(a, s) && !bedridden(a, s)) {
             return (a, "实在撑不住了");
         }
     }
 
     // 番茄钟 / 你让她做的事：生理这关过了就听它的，作息和心情都往后排
     if let Some((target, why)) = hold {
-        if let Some(a) = best_matching(cat, target, |a| meets(a, s)) {
+        if let Some(a) = best_matching(cat, target, |a| meets(a, s) && !bedridden(a, s)) {
             return (a, why);
         }
     }
@@ -767,6 +862,11 @@ pub(crate) fn meets(a: &ActionDef, s: &PetState) -> bool {
         && s.hunger >= r.min_hunger
         && s.thirst >= r.min_thirst
         && s.strength <= r.max_strength
+}
+
+/// 病重（Ill）的时候正事和玩一律干不动。吃喝睡不在此列——病人也要吃饭
+pub(crate) fn bedridden(a: &ActionDef, s: &PetState) -> bool {
+    s.health < ILL_HEALTH && SUPPRESSIBLE.iter().any(|t| a.has_tag(t))
 }
 
 /// 用户开口要她做某件事。`target` 可以是动作 id（`work_copy`），
@@ -879,12 +979,15 @@ pub fn catch_up(cat: &Catalog, shelf: &FoodShelf, p: &Pet, now_ms: i64, hour: f3
     )
 }
 
-/// docs/05 §5：feeling ≥ 70 → Happy；≥ 40 → Nomal；< 40 或 strength < 20 → PoorCondition。
-/// Ill 要「连续 3 天 PoorCondition」，得在流水上做跨天统计，留给 Phase 7 的 Mood Engine。
+/// 四套动画对应的四种状态（docs/03 §3）：健康 < 25 → Ill；体力 < 20 或心情 < 40 →
+/// PoorCondition；心情 ≥ 70 且没病 → Happy；其余 Nomal。病着（健康 < 50）再开心也
+/// 只到 Nomal——脸色摆在那里
 fn derive_mood(s: &PetState) -> Mood {
-    if s.strength < POOR_STRENGTH || s.feeling < NOMAL_FEELING {
+    if s.health < ILL_HEALTH {
+        Mood::Ill
+    } else if s.strength < POOR_STRENGTH || s.feeling < NOMAL_FEELING {
         Mood::PoorCondition
-    } else if s.feeling >= HAPPY_FEELING {
+    } else if s.feeling >= HAPPY_FEELING && s.health >= SICK_HEALTH {
         Mood::Happy
     } else {
         Mood::Nomal
@@ -898,9 +1001,11 @@ fn clamp(s: &mut PetState) {
         &mut s.hunger,
         &mut s.thirst,
         &mut s.affection,
+        &mut s.health,
     ] {
         *v = v.clamp(0.0, 100.0);
     }
+    s.remedy = s.remedy.max(0.0);
     s.money = s.money.max(0.0);
     s.exp = s.exp.max(0.0);
 }
@@ -2014,6 +2119,167 @@ mod tests {
         // Pet::default() 走的是手写 impl，不是 derive——serde default 管不到它
         assert_eq!(Pet::default().touch_budget, TOUCH_BUDGET_MAX);
         assert_eq!(Pet::default().state.affection, 50.0);
+    }
+
+    /* --- 健康 --- */
+
+    /// 一颗药：health 40，体力 +20，价格 50
+    fn pharmacy() -> FoodShelf {
+        use super::super::food::FoodItem;
+        let mut s = FoodShelf::default();
+        s.set(vec![FoodItem {
+            id: "pill".into(),
+            name: "pill".into(),
+            graph: "eat".into(),
+            kind: "Drug".into(),
+            strength: 20.0,
+            strength_food: 0.0,
+            strength_drink: 0.0,
+            feeling: 0.0,
+            health: 40.0,
+            price: 50.0,
+        }]);
+        s
+    }
+
+    /// 只推数值，不让她换事做：直接喂 Tick 但把三项都按住
+    fn hold(p: &mut Pet, hunger: f32, thirst: f32, strength: f32) {
+        p.state.hunger = hunger;
+        p.state.thirst = thirst;
+        p.state.strength = strength;
+    }
+
+    #[test]
+    fn 饿着渴着累着健康和心情都往下掉() {
+        // 三项压在 UNWELL 线的两侧各过一小时。凌晨三点两边都在睡觉（作息压过「有点饿」），
+        // 睡觉本身涨的那点心情两边一样，差出来的就是饿着渴着累着掉的
+        let c = cat();
+        let mut low = Pet::default();
+        let mut fine = Pet::default();
+        low.state.health = 80.0; // 满血会被 clamp 吃掉自然回的那点
+        fine.state.health = 80.0;
+        for _ in 0..60 {
+            // 睡觉每分钟回 1 体力，按在线下两格才能整分钟都算「累着」
+            hold(&mut low, UNWELL - 1.0, UNWELL - 1.0, UNWELL - 2.0);
+            hold(&mut fine, UNWELL + 1.0, UNWELL + 1.0, UNWELL + 1.0);
+            low = reduce(&c, &shelf(), &low, &Event::Tick { minutes: 1.0, hour: 3.0 });
+            fine = reduce(&c, &shelf(), &fine, &Event::Tick { minutes: 1.0, hour: 3.0 });
+        }
+        assert_eq!(low.state.activity, Activity::Sleeping);
+        assert_eq!(fine.state.activity, Activity::Sleeping);
+        let lost = fine.state.health - low.state.health;
+        let expected = HEALTH_LOSS * 3.0 * 60.0 + HEALTH_REGEN * 60.0;
+        assert!((lost - expected).abs() < 0.5, "一小时该差 {expected}，差了 {lost}");
+        let gap = fine.state.feeling - low.state.feeling;
+        assert!((gap - FEELING_UNWELL * 3.0 * 60.0).abs() < 0.5, "饿着渴着累着心情该多掉 9：差了 {gap}");
+    }
+
+    #[test]
+    fn 什么都不缺时健康慢慢养回来_病了就养不回来() {
+        let c = cat();
+        let mut p = Pet::default();
+        p.state.health = 70.0;
+        for _ in 0..120 {
+            hold(&mut p, 90.0, 90.0, 90.0);
+            p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 3.0 });
+        }
+        assert!(p.state.health > 70.0, "两小时没养回来一点：{}", p.state.health);
+        assert!(p.state.health < 80.0, "养得太快了：{}", p.state.health);
+
+        // 病着 vs 没病，其余一样过一小时：差的那截就是病掉的心情（她在做的事本身也涨跌心情）
+        let mut sick = Pet::default();
+        sick.state.health = 40.0; // 病线以下
+        let mut well = Pet::default();
+        for _ in 0..60 {
+            hold(&mut sick, 90.0, 90.0, 90.0);
+            hold(&mut well, 90.0, 90.0, 90.0);
+            sick = reduce(&c, &shelf(), &sick, &Event::Tick { minutes: 1.0, hour: 3.0 });
+            well = reduce(&c, &shelf(), &well, &Event::Tick { minutes: 1.0, hour: 3.0 });
+        }
+        assert!(sick.state.health <= 40.0, "病了不该自己好：{}", sick.state.health);
+        let gap = well.state.feeling - sick.state.feeling;
+        assert!(gap >= FEELING_SICK * 60.0 - 0.5, "病着心情该大幅掉：没病 {} 病着 {}", well.state.feeling, sick.state.feeling);
+    }
+
+    #[test]
+    fn 喂药之后健康慢慢好转_不是一口见底() {
+        let c = cat();
+        let ph = pharmacy();
+        let mut p = Pet::default();
+        p.state.health = 40.0;
+        p.state.strength = 50.0;
+        let aff = p.state.affection;
+        p = reduce(&c, &ph, &p, &Event::Medicated { id: "pill".into(), name: "pill".into() });
+        assert_eq!(p.state.action.as_ref().map(|a| a.id.as_str()), Some("medicine"));
+        assert_eq!(p.state.activity, Activity::Eating, "借吃的夹心动画");
+        assert_eq!(p.state.action.as_ref().and_then(|a| a.food.as_ref()).map(|f| f.id.as_str()), Some("pill"));
+        assert!((p.state.health - 40.0).abs() < 0.01, "药效不该当场到账：{}", p.state.health);
+        assert_eq!(p.state.remedy, 40.0);
+        assert_eq!(p.state.strength, 70.0, "药自带的体力当场给");
+        assert!(p.state.affection > aff, "病中喂药该涨好感");
+        // 十分钟后吸收了 REMEDY_PER_MIN × 10
+        for _ in 0..10 {
+            hold(&mut p, 90.0, 90.0, 90.0);
+            p = reduce(&c, &ph, &p, &Event::Tick { minutes: 1.0, hour: 3.0 });
+        }
+        let gained = p.state.health - 40.0;
+        assert!((gained - REMEDY_PER_MIN * 10.0).abs() < 0.5, "十分钟该回 {}，回了 {gained}", REMEDY_PER_MIN * 10.0);
+        assert!(p.state.remedy < 40.0 && p.state.remedy > 0.0, "药效池该在慢慢消耗：{}", p.state.remedy);
+        // 吸收完就停在应到的量
+        for _ in 0..120 {
+            hold(&mut p, 90.0, 90.0, 90.0);
+            p = reduce(&c, &ph, &p, &Event::Tick { minutes: 1.0, hour: 3.0 });
+        }
+        assert_eq!(p.state.remedy, 0.0);
+        assert!(p.state.health >= 80.0 - 0.5, "40 + 40 的药该到 80 上下：{}", p.state.health);
+    }
+
+    #[test]
+    fn 健康决定四套动画里的哪一套() {
+        let mut s = PetState::default();
+        s.feeling = 90.0;
+        s.health = 100.0;
+        assert_eq!(derive_mood(&s), Mood::Happy);
+        s.health = 45.0;
+        assert_eq!(derive_mood(&s), Mood::Nomal, "病着再开心也只到 Nomal");
+        s.health = 20.0;
+        assert_eq!(derive_mood(&s), Mood::Ill);
+        s.health = 100.0;
+        s.feeling = 30.0;
+        assert_eq!(derive_mood(&s), Mood::PoorCondition);
+    }
+
+    #[test]
+    fn 病重了正事一律放下() {
+        let c = cat();
+        let mut p = run(&c, Pet::default(), 30, 10.0);
+        assert_eq!(p.state.activity, Activity::Working, "前提：十点在上班");
+        p = reduce(&c, &shelf(), &p, &Event::Patch {
+            strength: None, feeling: None, hunger: None, thirst: None, money: None, affection: None,
+            health: Some(15.0),
+        });
+        p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 10.5 });
+        assert_eq!(p.state.mood, Mood::Ill);
+        let a = p.state.action.as_ref().unwrap();
+        assert!(!SUPPRESSIBLE.iter().any(|t| c.get(&a.id).unwrap().has_tag(t)), "病重了还在 {}", a.name);
+        // 使唤她去工作：不掷骰子，直接说不舒服
+        p = reduce(&c, &shelf(), &p, &Event::Request { target: "work".into(), roll: 0.0, minutes: None });
+        let v = p.last_verdict.clone().unwrap();
+        assert!(!v.obey);
+        assert_eq!(v.refusal, Some(Refusal::Sick));
+        // 但吃饭照吃：病人也要吃饭
+        p.state.hunger = 5.0;
+        p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 10.6 });
+        assert_eq!(p.state.activity, Activity::Eating);
+    }
+
+    #[test]
+    fn 旧存档没有健康字段时按满血读() {
+        let json = serde_json::to_string(&PetState::default()).unwrap().replace("\"health\":100.0,", "").replace("\"remedy\":0.0,", "");
+        assert!(!json.contains("health"), "{json}");
+        let s: PetState = serde_json::from_str(&json).unwrap();
+        assert_eq!(s.health, 100.0);
+        assert_eq!(s.remedy, 0.0);
     }
 }
 

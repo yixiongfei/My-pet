@@ -158,6 +158,17 @@ fn emit(app: &AppHandle, a: &ActionRef, text: String, spoken: bool) {
     let _ = app.emit("pet:line", Line { text, action: a.id.clone(), spoken });
 }
 
+/// 不挂在哪个动作上的一句话（生病了、没病不用吃药）。走台词总开关，不受间隔限制——
+/// 这类话一天说不了几次，每一次都该让人听见
+pub fn say(app: &AppHandle, tag: &str, text: &str) {
+    let enabled = chat::current_settings(app).map(|s| s.lines.enabled).unwrap_or(true);
+    if !enabled {
+        return;
+    }
+    log::info!("{tag}：{text}");
+    let _ = app.emit("pet:line", Line { text: text.into(), action: tag.into(), spoken: true });
+}
+
 /// 她刚开始做 `a`。`force` = 不受间隔限制（收礼物必须当场有反应）。
 /// 固定台词立刻发；模型即兴放到后台，几秒后再发
 pub fn announce(app: &AppHandle, a: &ActionRef, force: bool) {

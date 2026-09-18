@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { PetState, Verdict } from '@vpet/shared'
 import { invokeCore, IS_TAURI } from '../body/ipc'
 import { subscribePetState } from '../body/petState'
-import { Gauge } from './Gauge'
+import { Gauge, GREEN, RED, YELLOW } from './Gauge'
 
 /** 面板刷新节奏。Core 只在换动作时推事件，数值得自己拉 */
 const REFRESH_MS = 1000
@@ -126,6 +126,19 @@ interface DirectiveRow {
   left: number
 }
 
+/** 与 Rust 侧 state_machine.rs 的 SICK_HEALTH / ILL_HEALTH 成对改 */
+const SICK = 50
+const ILL = 25
+
+/** 药单里的一项（Core 的 FoodItem，只用到这几个字段） */
+interface Medicine {
+  id: string
+  name: string
+  health: number
+  feeling: number
+  price: number
+}
+
 const TARGET_LABEL: Record<string, string> = {
   work: '工作', study: '学习', play: '玩', rest: '休息', eat: '吃饭', drink: '喝水', sleep: '睡觉',
 }
@@ -143,6 +156,8 @@ export function Panel() {
   const [state, setState] = useState<PetState | null>(null)
   const [version, setVersion] = useState('')
   const [gift, setGift] = useState<string | null>(null)
+  const [medicines, setMedicines] = useState<Medicine[]>([])
+  const [fed, setFed] = useState<string | null>(null)
   const [timers, setTimers] = useState<TimerRow[]>([])
   const [pomo, setPomo] = useState<Pomo | null>(null)
   const [audit, setAudit] = useState<AuditRow[]>([])
@@ -158,6 +173,7 @@ export function Panel() {
 
   useEffect(() => {
     void invokeCore<string>('app_version').then((v) => v && setVersion(v))
+    void invokeCore<Medicine[]>('list_medicines').then((m) => m && setMedicines(m))
     const pull = () => {
       void invokeCore<PetState>('get_pet_state').then((s) => s && setState(s))
       void invokeCore<TimerRow[]>('list_timers').then((t) => t && setTimers(t))
@@ -179,6 +195,8 @@ export function Panel() {
   }, [])
 
   const patch = (p: Record<string, number>) => void invokeCore('debug_patch_pet_state', p)
+  const feed = (id?: string) =>
+    void invokeCore<string>('give_medicine', id ? { id } : {}).then((n) => setFed(n ? `喂了：${n}` : '（她说不用吃药）'))
   const pullMems = () => {
     void invokeCore<MemoryRow[]>('list_memories').then((m) => m && setMems(m))
     void invokeCore<MemoryHealth>('memory_health').then(setMemHealth)
@@ -256,12 +274,38 @@ export function Panel() {
             <Gauge label="饱腹" value={state.hunger} />
             <Gauge label="口渴" value={state.thirst} />
             <Gauge label="好感" value={state.affection} accent="#c98bdb" />
+            <Gauge
+              label="健康"
+              value={state.health}
+              accent={state.health < ILL ? RED : state.health < SICK ? YELLOW : GREEN}
+              note={state.remedy > 0 ? `药效还有 +${state.remedy.toFixed(0)}` : undefined}
+            />
             <div style={{ display: 'flex', gap: 24, marginTop: 14, fontSize: 15 }}>
               <span>💰 {state.money.toFixed(1)}</span>
               <span>⭐ Lv{state.level}</span>
               <span style={{ color: '#8a8a93' }}>经验 {state.exp.toFixed(0)}</span>
             </div>
           </Card>
+
+          {state.health < SICK && (
+            <Card title={state.health < ILL ? '她病得很重' : '她生病了'}>
+              <p style={{ margin: '0 0 12px', color: '#8a8a93', fontSize: 13 }}>
+                健康掉到 {SICK} 以下就养不回来了，只能靠你喂药；心情也会一直往下掉。
+                {state.health < ILL && '低于 25 她什么正事都干不动，只会躺着。'}
+                药效不是一口见底，吃下去会按分钟慢慢起作用。
+              </p>
+              <Row>
+                <Btn onClick={() => feed()}>喂药（自动挑一种）</Btn>
+                {medicines.map((m) => (
+                  <Btn key={m.id} onClick={() => feed(m.id)}>
+                    {m.name} +{m.health}
+                    {m.feeling ? ` · 心情${m.feeling > 0 ? '+' : ''}${m.feeling}` : ''}
+                  </Btn>
+                ))}
+              </Row>
+              {fed && <p style={{ color: '#a8d5a2', marginBottom: 0 }}>{fed}</p>}
+            </Card>
+          )}
 
           <Card title="使唤她">
             <p style={{ margin: '0 0 12px', color: '#8a8a93', fontSize: 13 }}>
@@ -480,6 +524,8 @@ export function Panel() {
               <Btn onClick={() => patch({ thirst: 10 })}>渴到 10</Btn>
               <Btn onClick={() => patch({ strength: 10 })}>累到 10</Btn>
               <Btn onClick={() => patch({ feeling: 10 })}>心情 10</Btn>
+              <Btn onClick={() => patch({ health: 40 })}>病到 40</Btn>
+              <Btn onClick={() => patch({ health: 15 })}>病到 15</Btn>
             </Row>
             <Row>
               <Btn onClick={() => patch({ money: 0 })}>钱清零</Btn>
@@ -493,7 +539,7 @@ export function Panel() {
               </Btn>
               <Btn
                 onClick={() =>
-                  patch({ strength: 100, feeling: 60, hunger: 100, thirst: 100, affection: 50 })
+                  patch({ strength: 100, feeling: 60, hunger: 100, thirst: 100, affection: 50, health: 100 })
                 }
               >
                 全部复原

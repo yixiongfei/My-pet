@@ -1,7 +1,7 @@
 const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
 /**
- * 订阅 Core 发来的事件（docs/03 §5 事件面）。
+ * 订阅 Core 发来的事件（docs/02 §3 契约）。
  *
  * 浏览器预览里没有 Tauri，退化成监听同名的 window CustomEvent，这样不开 Tauri
  * 也能调：`window.dispatchEvent(new CustomEvent('pet:state', { detail: {…} }))`

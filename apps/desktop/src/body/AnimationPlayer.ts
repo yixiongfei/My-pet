@@ -34,7 +34,7 @@ const MISSING_GIVE_UP = 8
 /**
  * Canvas 2D 帧动画播放器。
  *
- * 三段式（docs/05 §3）：play() → start（若有）→ loop（随机变体，循环到 stop()）→ end（若有）→ onIdle。
+ * 三段式（docs/04 §2）：play() → start（若有）→ loop（随机变体，循环到 stop()）→ end（若有）→ onIdle。
  * 时间推进用 rAF + 累计时间，按每帧自带的 ms 走，不用 setInterval。
  * 帧解码用 createImageBitmap，按 clip 预解码并做 LRU 缓存。
  */
@@ -355,7 +355,7 @@ export class AnimationPlayer {
     if (gen === this.generation) this.onIdle?.()
   }
 
-  /** 后层 → 食物 → 前层，依次画上去（docs/05 §3 双图层） */
+  /** 后层 → 食物 → 前层，依次画上去（docs/04 §2 双图层） */
   private draw(): void {
     const s = this.manifest.size
     this.ctx.clearRect(0, 0, s, s)

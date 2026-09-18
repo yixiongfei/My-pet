@@ -7,7 +7,7 @@
  *                                          apps/desktop/public/pet/manifest.json
  *
  * 目录 → 动画信息的推断规则移植自 legacy/VPet-Simulator.Core/Handle/PetLoader.cs（LoadGraph）
- * 与 legacy/VPet-Simulator.Core/Graph/GraphInfo.cs（GraphInfo(path, info)），见 docs/05-body-assets.md §1。
+ * 与 legacy/VPet-Simulator.Core/Graph/GraphInfo.cs（GraphInfo(path, info)），见 docs/04-body-animation.md §1。
  *
  * 用法：node scripts/build-assets.mjs [--pet vup] [--size 500] [--quality 85] [--force] [--dry]
  */

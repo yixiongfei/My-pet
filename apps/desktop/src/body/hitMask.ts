@@ -13,7 +13,7 @@ const BYTES = Math.ceil((N * N) / 8)
 
 /**
  * 从当前帧算出「哪些格子是不透明的」，供 Rust 侧判定光标是否压在宠物身上
- * （docs/05 §4 的 alpha 命中）。
+ * （docs/04 §4 的 alpha 命中）。
  *
  * 做法是把 500×500 的帧缩到 48×48 再读回 alpha：readback 只有 ~9KB，
  * 比直接对原图 getImageData（1MB）便宜两个数量级。

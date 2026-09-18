@@ -1,4 +1,4 @@
-param(
+﻿param(
     # 跳过测试直接编译（改了几行 CSS 不想等两分钟测试的时候用）
     [switch]$SkipTests,
     # 只检查不编译：cargo test + typecheck，提交前跑一遍

@@ -1,4 +1,4 @@
-param([switch]$Rebuild)
+﻿param([switch]$Rebuild)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeDir = Join-Path $projectRoot '.runtime'

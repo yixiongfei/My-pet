@@ -308,3 +308,18 @@ duration = 3
 cooldown = 0
 per_min = { strength = 0.2, hunger = 0.0, thirst = 0.0, feeling = 0.0 }
 lines = ["送给我的「{food}」吗？谢谢你，我很喜欢！", "哇，{food}！你怎么知道我想要这个。", "谢谢你的{food}，我会好好珍惜的。"]
+
+# ---------- 吃药：用户喂的，她自己不会去买 ----------
+# 走 give_medicine 命令触发（托盘 / 面板），没有 eat / need 标签所以 decide 挑不到它。
+# 借「吃」的夹心动画把药片送进嘴里；药效（health）进 remedy 池按分钟慢慢吸收
+
+[[action]]
+id = "medicine"
+name = "吃药"
+activity = "eating"
+graph = "eat"
+tags = ["medicine"]
+duration = 2
+cooldown = 0
+per_min = { strength = 0.0, hunger = 0.0, thirst = 0.0, feeling = 0.0 }
+lines = ["咳……{food}好苦。", "吃了{food}就会好起来的吧？", "谢谢你照顾我……", "唔，我会乖乖吃药的。"]
