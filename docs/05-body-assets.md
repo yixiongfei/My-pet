@@ -148,5 +148,6 @@ mood 由体力/心情决定：feeling ≥ 70 → Happy；≥ 40 → Nomal；< 40
 
 - 资产生成没有漏帧：当前仍是 609 clips / 6181 帧；其中 SideHide 48 clips / 254 帧已经进入交互状态机，不复制资源，也不另造近似动画。
 - `pet.json` 已完整解析原版 16 条 `move` 规则和左右侧挂锚点；窗口几何由 `pet_motion.rs` 管，Body 只按 `pet:motion` 播动画，避免后台 WebView 节流导致窗口走慢。
-- 左右 SideHide 已完成；走路、爬行、爬墙、顶部移动与坠落的 98 clips / 534 帧正在按原版 `GraphHelper.Move` 的 Trigger / Check / Locate / Speed 规则接入。
+- 走路、爬行、左右爬墙、顶部移动和坠落的 98 clips / 534 帧已接入。Trigger / Check 的八个方向位、心情 Mode mask、Locate、125 ms 速度与 Distance 循环概率都沿用 `GraphHelper.Move`；兼容切换直接播新 start，最终停止才播当前 end。
+- 位移在 Core 的 50 ms 原生轮询中按规则 Interval 补拍，并在每一步做 Check 安全检查；这比原版只在 B_Loop 结束时检查更保守，目的是避免 WebView 后台节流时窗口继续走出屏幕。一次移动始终使用开始时的显示器边界，多屏交界处不会中途换参考系。
 - `Think` 在原资源里本来就是 `common + name=think`，不是独立 `type=think`。接对话等待动画时必须按 manifest 的真实键查找，不能因为旧设计稿里的示例另造映射。

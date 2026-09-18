@@ -56,8 +56,12 @@ export class AnimationPlayer {
   private elapsed = 0
   private lastT = 0
   private stopping = false
+  /** 这次请求只播一轮；与用户在 start 中途调用 stop() 分开。 */
+  private once = false
   private raf = 0
   private generation = 0
+  /** 当前画面属于哪次请求；旧 clip 结束时不能拿新的 target / callback 继续播放。 */
+  private activeGeneration = 0
   private destroyed = false
 
   /** loop 段自然结束、且已被 stop() 后回调（end 段播完） */
@@ -86,9 +90,20 @@ export class AnimationPlayer {
 
   /** 播放一个目标动画；若当前有动画会直接切换（不等 end 段） */
   async play(t: PlayTarget): Promise<void> {
+    await this.startPlay(t, false)
+  }
+
+  /** 播放一次：start → loop 只跑一遍 → end → onIdle */
+  async playOnce(t: PlayTarget): Promise<void> {
+    await this.startPlay(t, true)
+  }
+
+  /** once 必须在任何 await 之前绑定到这次 generation，不能用全局延迟补写。 */
+  private async startPlay(t: PlayTarget, once: boolean): Promise<void> {
     const gen = ++this.generation
     this.target = { type: t.type, name: t.name ?? t.type, mood: t.mood ?? 'nomal' }
     this.stopping = false
+    this.once = once
     this.stepDone = null
     this.layered = null
     this.food = null
@@ -104,18 +119,13 @@ export class AnimationPlayer {
     const first = start.length ? { phase: 'start' as Phase, clip: pick(start) } : loop.length ? { phase: 'loop' as Phase, clip: pick(loop) } : single.length ? { phase: 'loop' as Phase, clip: pick(single) } : null
     if (!first) {
       console.warn(`[AnimationPlayer] 没有动画：${this.target.type}/${this.target.name}/${this.target.mood}`)
-      this.onIdle?.()
+      const idle = this.onIdle
+      queueMicrotask(() => { if (gen === this.generation) idle?.() })
       return
     }
     await this.switchTo(first.clip, first.phase, gen)
     // 预热下一段
     void this.preload(loop.length ? loop : single)
-  }
-
-  /** 播放一次：start → loop 只跑一遍 → end → onIdle */
-  async playOnce(t: PlayTarget): Promise<void> {
-    await this.play(t)
-    this.stopping = true
   }
 
   /**
@@ -127,10 +137,12 @@ export class AnimationPlayer {
     const gen = ++this.generation
     this.target = { type: t.type, name: t.name ?? t.type, mood: t.mood ?? 'nomal' }
     this.stopping = false
+    this.once = false
     const clips = this.resolve(animat)
     if (!clips.length) {
       this.stepDone = null
-      onDone?.()
+      // 非法 / 缺段目标不能同步递归外部 FSM；并且回调执行前再查一次代际。
+      queueMicrotask(() => { if (gen === this.generation) onDone?.() })
       return
     }
     this.stepDone = onDone ?? null
@@ -167,7 +179,7 @@ export class AnimationPlayer {
   private async switchTo(clip: GraphClip, phase: Phase, gen: number): Promise<void> {
     const track = await this.loadTrack(clip)
     if (gen !== this.generation || this.destroyed) return
-    this.begin([track], phase)
+    this.begin([track], phase, gen)
   }
 
   /** 夹心动画：后层 → 前层两条轨道同时跑（中间的食物精灵在 drawFood 里） */
@@ -189,7 +201,7 @@ export class AnimationPlayer {
     // 食物有自己的时间轴（和前后层的总时长不一定完全相等），超出就停在最后一段
     let acc = 0
     this.food = bmp && item ? { item, bmp, keys: l.food, cum: l.food.map((k) => (acc += k.ms)) } : null
-    this.begin(tracks, phase)
+    this.begin(tracks, phase, gen)
   }
 
   private async loadFoodImage(item: FoodItem): Promise<ImageBitmap | null> {
@@ -235,9 +247,10 @@ export class AnimationPlayer {
     this.ctx.restore()
   }
 
-  private begin(tracks: Track[], phase: Phase): void {
+  private begin(tracks: Track[], phase: Phase, gen: number): void {
     this.tracks = tracks
     this.phase = phase
+    this.activeGeneration = gen
     this.playing = true
     this.elapsed = 0
     this.lastT = performance.now()
@@ -263,7 +276,7 @@ export class AnimationPlayer {
     const total = this.tracks[0]?.cum.at(-1) ?? 0
     if (this.elapsed >= total) {
       this.playing = false
-      void this.onClipEnd()
+      void this.onClipEnd(this.activeGeneration)
       return
     }
 
@@ -279,8 +292,10 @@ export class AnimationPlayer {
     this.raf = requestAnimationFrame(this.tick)
   }
 
-  private async onClipEnd(): Promise<void> {
-    const gen = this.generation
+  private async onClipEnd(gen: number): Promise<void> {
+    // 新请求可能还在解码，旧画面这时才自然结束。旧代际不得读取新 target、
+    // 吞掉新 stepDone，或替新请求抢先启动 loop。
+    if (gen !== this.generation) return
     if (this.phase === 'step') {
       const done = this.stepDone
       this.stepDone = null
@@ -288,6 +303,8 @@ export class AnimationPlayer {
       return
     }
     if (this.phase === 'start') {
+      // start 期间收到 stop 时直接进 end；不要再强制多跑 0.75–1.75 秒 loop。
+      if (this.stopping) return this.finish(gen)
       const loop = this.resolve('loop')
       const single = this.resolve('single')
       const next = loop.length ? loop : single
@@ -295,7 +312,7 @@ export class AnimationPlayer {
       return this.finish(gen)
     }
     if (this.phase === 'loop') {
-      if (!this.stopping) {
+      if (!this.stopping && !this.once) {
         // 夹心动画只有一份，直接重播
         if (this.layered) return this.switchToLayered(this.layered, 'loop', gen)
         // 每一轮随机换一个变体（原版 Default 的行为）

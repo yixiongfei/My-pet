@@ -1527,6 +1527,10 @@ pub fn run() {
             begin_pet_drag,
             end_pet_drag,
             pet_motion::set_pet_motion_profile,
+            pet_motion::start_pet_motion,
+            pet_motion::begin_pet_motion_step,
+            pet_motion::complete_pet_motion_cycle,
+            pet_motion::stop_pet_motion,
             pet_motion::exit_pet_side,
             open_chat,
             open_settings_panel,
@@ -1698,9 +1702,13 @@ fn spawn_hit_test(app: AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(POLL);
         // 对话窗口的贴边收起也搭这趟车
-        dock::poll(&app, primary_button_held());
+        let button_held = primary_button_held();
+        dock::poll(&app, button_held);
         let Some(win) = app.get_webview_window(PET_WINDOW) else { continue };
 
+        // 自主走路必须放在原生轮询上：WebView 在后台会节流 rAF，但窗口不能因此
+        // 越走越远。鼠标按住时暂停，随后拖拽位置拥有更高优先级。
+        pet_motion::poll(&app, &win, button_held);
         advance_pet_drag(&app, &win);
 
         let ignore = match should_ignore(&app, &win) {

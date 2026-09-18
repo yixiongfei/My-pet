@@ -1,5 +1,12 @@
 import { invokeCore } from './ipc'
 
+export type PetMotionEvent =
+  | { kind: 'side'; side: 'left' | 'right' }
+  | { kind: 'side-stop' }
+  | { kind: 'move'; id: number; graph: string }
+  | { kind: 'move-continue'; id: number }
+  | { kind: 'move-stop'; id: number; graph: string }
+
 /** 把当前帧的命中掩码推给 Rust 的穿透判定（按位打包的 48×48） */
 export const pushHitMask = (cells: Uint8Array) => void invokeCore('set_hit_mask', { cells: Array.from(cells) })
 
@@ -27,6 +34,19 @@ export const pushMotionProfile = (profile: { moves: unknown[]; side: unknown }) 
 
 /** 侧挂状态下先把窗口完整拉回屏幕，再交给普通点击 / 提起逻辑。 */
 export const exitPetSide = () => void invokeCore('exit_pet_side')
+
+/** 真正空闲时请 Core 按原版 Trigger / Mode 规则挑一个可用移动。 */
+export const startPetMotion = (mood: string) => invokeCore<PetMotionEvent>('start_pet_motion', { mood })
+
+/** start 段结束后，Core 才应用 Locate 并按原版 125 ms 步进窗口。 */
+export const beginPetMotionStep = (id: number) => invokeCore<boolean>('begin_pet_motion_step', { id })
+
+/** 一轮 B_Loop 结束后执行原版 Distance / 兼容动作判定。 */
+export const completePetMotionCycle = (id: number) =>
+  invokeCore<PetMotionEvent>('complete_pet_motion_cycle', { id })
+
+/** 触摸、说话、状态变化都优先于自主移动。 */
+export const stopPetMotion = () => void invokeCore('stop_pet_motion')
 
 /** 送她一样礼物（随机挑一件）。返回礼物名字，没货架时返回 null */
 export const giveGift = (id?: string) => invokeCore<string>('give_gift', { id })

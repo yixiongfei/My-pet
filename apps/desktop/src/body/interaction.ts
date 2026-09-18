@@ -2,7 +2,16 @@ import type { GraphType, Manifest, PetProfile, PetState } from '@vpet/shared'
 import type { AnimationPlayer } from './AnimationPlayer'
 import { namesFor, pick } from './manifest'
 import { CLIP_FOR, DEFAULT_PET_STATE } from './petState'
-import { beginPetDrag, endPetDrag, setHitTestPinned } from './petWindow'
+import {
+  beginPetDrag,
+  beginPetMotionStep,
+  completePetMotionCycle,
+  endPetDrag,
+  setHitTestPinned,
+  startPetMotion,
+  stopPetMotion,
+  type PetMotionEvent,
+} from './petWindow'
 import { clickZone, type ClickZone } from './touch'
 
 /** 按住多久算长按（原版 Setting.PressLength，默认 0.5s） */
@@ -10,6 +19,8 @@ const PRESS_MS = 500
 const DRAG_THRESHOLD_PX = 6
 /** 空闲多久随机播一个小动作 */
 const IDLE_ACTION_EVERY_MS: [number, number] = [15_000, 40_000]
+/** 原版每次 15 秒空闲判定约有 3/20 机会移动；这里计时更稀疏，适当提高单次命中。 */
+const MOVE_CHANCE = 0.4
 /** 提起后先挣扎几次再转静止（原版 rasetype 0→2，共 3 次 Raised_Dynamic） */
 const STRUGGLE_TIMES = 3
 
@@ -25,10 +36,6 @@ export interface InteractionOpts {
   onSideExit?: () => void
 }
 
-type MotionEvent =
-  | { kind: 'side'; side: 'left' | 'right' }
-  | { kind: 'stop' }
-
 /**
  * 触摸交互状态机，移植自 legacy/VPet-Simulator.Core/Display/Main.xaml.cs 的鼠标处理：
  *
@@ -40,7 +47,7 @@ type MotionEvent =
  */
 export class Interaction {
   /** 交互模式，和 PetState.activity 是两回事：这个说「此刻正在干什么」 */
-  private mode: 'idle' | 'touching' | 'raised' | 'talking' | 'side' | 'side-exit' = 'idle'
+  private mode: 'idle' | 'touching' | 'raised' | 'talking' | 'moving' | 'move-exit' | 'side' | 'side-exit' = 'idle'
   private state: PetState = DEFAULT_PET_STATE
   private idleTimer = 0
   private pressTimer = 0
@@ -57,6 +64,10 @@ export class Interaction {
   private sideHovered = false
   /** 每次切换侧挂阶段就递增；异步解码完的旧回调看到代数不一致便作废 */
   private sideGeneration = 0
+  private moveId: number | null = null
+  private moveGraph: string | null = null
+  /** Core 切换移动规则或用户中断时，让旧动画 / IPC 回调作废。 */
+  private moveGeneration = 0
 
   constructor(private readonly o: InteractionOpts) {}
 
@@ -80,6 +91,11 @@ export class Interaction {
       s.action?.id !== this.state.action?.id ||
       s.action?.food?.id !== this.state.action?.food?.id
     this.state = s
+    if (changed && (this.mode === 'moving' || this.mode === 'move-exit')) {
+      this.cancelMove()
+      this.toActivity()
+      return
+    }
     if (changed && this.mode === 'idle') this.toActivity()
   }
 
@@ -90,6 +106,11 @@ export class Interaction {
   startSay(): void {
     if (this.disposed) return
     this.speaking = true
+    if (this.mode === 'moving' || this.mode === 'move-exit') {
+      this.cancelMove()
+      this.playSay()
+      return
+    }
     if (this.mode === 'idle') this.playSay()
   }
 
@@ -112,6 +133,7 @@ export class Interaction {
    */
   playGift(foodId?: string): void {
     if (this.disposed || this.mode === 'raised') return
+    if (this.mode === 'moving' || this.mode === 'move-exit') this.cancelMove()
     this.mode = 'touching'
     window.clearTimeout(this.idleTimer)
     void this.o.player.playOnce({ type: 'common', name: 'gift', mood: this.state.mood, foodId })
@@ -120,11 +142,18 @@ export class Interaction {
   /** Core 只发窗口模式，具体的 Start/Loop/End 编排在 Body。 */
   handleMotion(payload: unknown): void {
     if (this.disposed || !payload || typeof payload !== 'object') return
-    const event = payload as Partial<MotionEvent> & { side?: unknown }
+    const event = payload as Partial<PetMotionEvent> & { side?: unknown; id?: unknown; graph?: unknown }
     if (event.kind === 'side' && (event.side === 'left' || event.side === 'right')) {
       this.enterSide(event.side)
-    } else if (event.kind === 'stop') {
+    } else if (event.kind === 'side-stop') {
       this.leaveSide()
+    } else if (event.kind === 'move' && typeof event.id === 'number' && typeof event.graph === 'string') {
+      // Core 只有在当前移动碰到边界时才主动推 move（初次启动由命令返回）。
+      // 若用户已开始触摸，迟到的换向事件必须反过来停掉 Core。
+      if (this.mode === 'moving' && this.moveId !== null) this.enterMove(event as Extract<PetMotionEvent, { kind: 'move' }>)
+      else stopPetMotion()
+    } else if (event.kind === 'move-stop' && typeof event.id === 'number' && typeof event.graph === 'string') {
+      this.finishMove(event.id, event.graph)
     }
   }
 
@@ -148,6 +177,7 @@ export class Interaction {
   dispose(): void {
     this.disposed = true
     this.sideGeneration++
+    this.cancelMove()
     window.clearTimeout(this.idleTimer)
     window.clearTimeout(this.pressTimer)
     endPetDrag()
@@ -163,6 +193,10 @@ export class Interaction {
     }
     this.lastAt = { x, y }
     this.pressAt = { x, y, screenX, screenY }
+    if (this.mode === 'moving' || this.mode === 'move-exit') {
+      this.cancelMove()
+      this.toActivity()
+    }
     this.setPinned(true) // 按下期间别让穿透判定把窗口切走
     window.clearTimeout(this.idleTimer)
     window.clearTimeout(this.pressTimer)
@@ -225,6 +259,7 @@ export class Interaction {
 
   /** 回到当前活动对应的循环动画。话还没说完就先接 say */
   private toActivity(): void {
+    if (this.moveId !== null) this.cancelMove()
     this.sideGeneration++
     this.side = null
     this.sideHovered = false
@@ -257,16 +292,31 @@ export class Interaction {
   private scheduleIdleAction(): void {
     window.clearTimeout(this.idleTimer)
     if (this.state.activity !== 'idle') return
-    const names = namesFor(this.o.manifest, 'idel', this.state.mood)
-    if (!names.length) return
     const [lo, hi] = IDLE_ACTION_EVERY_MS
     this.idleTimer = window.setTimeout(
-      () => {
-        if (this.disposed || this.mode !== 'idle') return
-        void this.o.player.playOnce({ type: 'idel', name: pick(names), mood: this.state.mood })
-      },
+      () => void this.runIdleAction(),
       lo + Math.random() * (hi - lo),
     )
+  }
+
+  private async runIdleAction(): Promise<void> {
+    if (this.disposed || this.mode !== 'idle' || this.state.activity !== 'idle') return
+    const requestGeneration = this.moveGeneration
+    if (Math.random() < MOVE_CHANCE) {
+      const event = await startPetMotion(this.state.mood)
+      if (this.disposed || this.mode !== 'idle' || this.state.activity !== 'idle' || requestGeneration !== this.moveGeneration) {
+        if (event?.kind === 'move') stopPetMotion()
+        return
+      }
+      if (event?.kind === 'move') {
+        this.enterMove(event)
+        return
+      }
+    }
+
+    const names = namesFor(this.o.manifest, 'idel', this.state.mood)
+    if (names.length) void this.o.player.playOnce({ type: 'idel', name: pick(names), mood: this.state.mood })
+    else this.scheduleIdleAction()
   }
 
   private touch(zone: ClickZone): void {
@@ -318,6 +368,87 @@ export class Interaction {
     void this.o.player.playStep({ type: 'raised_static', name, mood }, 'loop', this.raiseStep)
   }
 
+  /* ------------------------ 自主移动 ------------------------ */
+
+  private enterMove(event: Extract<PetMotionEvent, { kind: 'move' }>): void {
+    if (this.disposed || (this.mode !== 'idle' && this.mode !== 'moving')) {
+      stopPetMotion()
+      return
+    }
+    window.clearTimeout(this.idleTimer)
+    this.mode = 'moving'
+    this.moveId = event.id
+    this.moveGraph = event.graph
+    const generation = ++this.moveGeneration
+    void this.o.player.playStep(
+      { type: 'move', name: event.graph, mood: this.state.mood },
+      'start',
+      () => void this.beginMoveLoop(event.id, event.graph, generation),
+    )
+  }
+
+  private async beginMoveLoop(id: number, graph: string, generation: number): Promise<void> {
+    if (!this.isCurrentMove(id, graph, generation)) return
+    const began = await beginPetMotionStep(id)
+    if (!this.isCurrentMove(id, graph, generation)) return
+    if (began !== true) {
+      this.cancelMove()
+      this.toActivity()
+      return
+    }
+    this.loopMove(id, graph, generation)
+  }
+
+  private loopMove(id: number, graph: string, generation: number): void {
+    if (!this.isCurrentMove(id, graph, generation)) return
+    void this.o.player.playStep(
+      { type: 'move', name: graph, mood: this.state.mood },
+      'loop',
+      () => void this.completeMoveLoop(id, graph, generation),
+    )
+  }
+
+  private async completeMoveLoop(id: number, graph: string, generation: number): Promise<void> {
+    if (!this.isCurrentMove(id, graph, generation)) return
+    const decision = await completePetMotionCycle(id)
+    if (!this.isCurrentMove(id, graph, generation)) return
+    if (decision?.kind === 'move-continue' && decision.id === id) {
+      this.loopMove(id, graph, generation)
+    } else if (decision?.kind === 'move') {
+      // 原版切兼容动作时直接播新 A_Start，不播旧 C_End。
+      this.enterMove(decision)
+    } else if (decision?.kind === 'move-stop' && decision.id === id) {
+      this.finishMove(id, decision.graph)
+    } else {
+      this.cancelMove()
+      this.toActivity()
+    }
+  }
+
+  private finishMove(id: number, graph: string): void {
+    if (this.disposed || this.mode !== 'moving' || this.moveId !== id) return
+    this.moveId = null
+    this.moveGraph = null
+    this.mode = 'move-exit'
+    const generation = ++this.moveGeneration
+    void this.o.player.playStep({ type: 'move', name: graph, mood: this.state.mood }, 'end', () => {
+      if (!this.disposed && this.mode === 'move-exit' && generation === this.moveGeneration) this.toActivity()
+    })
+  }
+
+  private isCurrentMove(id: number, graph: string, generation: number): boolean {
+    return !this.disposed && this.mode === 'moving' && this.moveId === id &&
+      this.moveGraph === graph && this.moveGeneration === generation
+  }
+
+  private cancelMove(): void {
+    if (this.moveId !== null) stopPetMotion()
+    this.moveId = null
+    this.moveGraph = null
+    this.moveGeneration++
+    if (this.mode === 'moving' || this.mode === 'move-exit') this.mode = 'idle'
+  }
+
   /* ------------------------ 左右侧挂 ------------------------ */
 
   private sideType(side: 'left' | 'right', phase: 'main' | 'rise'): GraphType {
@@ -325,6 +456,7 @@ export class Interaction {
   }
 
   private enterSide(side: 'left' | 'right'): void {
+    this.cancelMove()
     window.clearTimeout(this.idleTimer)
     window.clearTimeout(this.pressTimer)
     this.side = side
