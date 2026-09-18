@@ -225,6 +225,11 @@ export function PetCanvas() {
         stops.push(subscribe('chat-stream', onChatStream))
         stops.push(subscribe('pet:drag-ended', () => interaction.onPointerUp(true)))
         stops.push(subscribe('pet:motion', (payload) => interaction.handleMotion(payload)))
+        // 歌到高潮：跳舞换成 ohhhh
+        stops.push(subscribe('pet:music', (payload) => {
+          const m = payload as { playing?: boolean; climax?: boolean } | null
+          interaction.setClimax(!!m?.playing && !!m?.climax)
+        }))
         // 托盘“退出”先让她播退场，动画结束才真正退出；Core 有 8 秒超时兜底。
         stops.push(subscribe('pet:shutdown-requested', () => {
           speech.interrupt()

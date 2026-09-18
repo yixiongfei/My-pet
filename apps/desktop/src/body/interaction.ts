@@ -85,6 +85,8 @@ export class Interaction {
   private pressOnFace = false
   /** 这一顿饭是不是在吃麦当劳（进入吃饭时掷一次，整顿饭不变） */
   private mcdonald = false
+  /** 歌到高潮了：跳舞时换成 saraburate/ohhhh，过去了回到原来那段 */
+  private climax = false
   /** 动画池里当前这一段：属于哪个活动、播到什么时候换。摸头 / 说话打断后回来接着播它 */
   private pooled: { activity: PetState['activity']; entry: PoolEntry; until: number } | null = null
   private poolTimer = 0
@@ -395,6 +397,12 @@ export class Interaction {
       this.playSay()
       return
     }
+    // 歌正到高潮：跳舞换成 ohhhh，直到高潮过去
+    if (this.climax && this.state.action?.graph === 'music' && this.hasClip('common', 'ohhhh')) {
+      window.clearTimeout(this.poolTimer)
+      void this.o.player.play({ type: 'common', name: 'ohhhh', mood: this.state.mood })
+      return
+    }
     // 工作 / 学习 / 玩：从动画池里挑一段，驻留期内被打断了回来还接着播它
     if (this.playPooled()) return
     this.pooled = null
@@ -551,6 +559,19 @@ export class Interaction {
     const names = namesFor(this.o.manifest, 'idel', this.state.mood)
     if (names.length) void this.o.player.playOnce({ type: 'idel', name: pick(names), mood: this.state.mood })
     else this.scheduleIdleAction()
+  }
+
+  /** Core 听声音：歌到高潮 / 过去了。只在她正跟着歌跳的时候换画面 */
+  setClimax(on: boolean): void {
+    if (this.disposed || this.climax === on) return
+    this.climax = on
+    if (this.mode !== 'idle' || this.state.action?.graph !== 'music') return
+    if (on && this.hasClip('common', 'ohhhh')) {
+      window.clearTimeout(this.poolTimer)
+      void this.o.player.play({ type: 'common', name: 'ohhhh', mood: this.state.mood })
+    } else {
+      this.toActivity() // 回到池里原来那段（驻留没到不重抽）
+    }
   }
 
   /** 捏脸：A 段捏住 → B 段循环到松手 → C 段放开。窗口不动，算一次摸头 */

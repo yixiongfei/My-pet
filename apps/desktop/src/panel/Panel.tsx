@@ -159,6 +159,29 @@ function remaining(dueAt: number): string {
   return m < 60 ? `${m}m${left % 60}s` : `${Math.floor(m / 60)}h${m % 60}m`
 }
 
+/**
+ * 设置页一打开就看到的「此刻」：她在做什么、为什么、心情怎样，再带四个数。
+ * 放在原来「刚刚好的陪伴距离」那块的位置——先看她，再调设置
+ */
+export function NowHero() {
+  const [state, setState] = useState<PetState | null>(null)
+  useEffect(() => {
+    void invokeCore<PetState>('get_pet_state').then((s) => s && setState(s))
+    return subscribePetState(setState)
+  }, [])
+  if (!state) return <><div className="section-kicker">此刻</div><h2>正在读取状态…</h2></>
+  const what = state.action?.name ?? '闲着'
+  const why = state.action?.reason ? `因为${state.action.reason}` : ''
+  const food = state.action?.food ? ` · ${state.action.food.name}` : ''
+  return <>
+    <div className="section-kicker">此刻 · {ACTIVITY_LABEL[state.activity] ?? state.activity} · {MOOD_LABEL[state.mood] ?? state.mood}</div>
+    <h2>{what}<span style={{ fontSize: 15, color: '#748b68', marginLeft: 12, fontFamily: 'system-ui, "Microsoft YaHei", sans-serif' }}>{why}{food}</span></h2>
+    <p className="section-description" style={{ marginBottom: 18 }}>
+      体力 {state.strength.toFixed(0)} · 心情 {state.feeling.toFixed(0)} · 饱腹 {state.hunger.toFixed(0)} · 口渴 {state.thirst.toFixed(0)} · 健康 {state.health.toFixed(0)} · 好感 {state.affection.toFixed(0)}
+    </p>
+  </>
+}
+
 export function Panel() {
   const [state, setState] = useState<PetState | null>(null)
   const [medicines, setMedicines] = useState<Medicine[]>([])

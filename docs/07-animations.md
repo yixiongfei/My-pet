@@ -11,7 +11,7 @@
 | WORK/study 看书 · calligraphy 写字 · studytwo 研究 · studypaint 画画 | `work/*` | 学习（`studying` 池） | ✅ |
 | WORK/playone 打游戏 · removeobject 删错误 · ropeskipping 跳绳 · playwater 玩水 | `work/*` | 玩（`playing` 池） | ✅ |
 | Relax/Tennis 网球 | `common/tennis` | 玩（`playing` 池） | ✅ |
-| Music · Music2 · saraburate/cosplay · saraburate/ohhhh | `common/music` `music2` `cosplay` `ohhhh` | 你在放歌 → Core `dance` → `ACTION_POOLS.music` 轮换 | ✅ |
+| Music · Music2 · saraburate/cosplay · saraburate/ohhhh | `common/music` `music2` `cosplay` `ohhhh` | 你在放歌 → Core `dance` → `ACTION_POOLS.music` 轮换；歌到高潮固定换 `ohhhh` | ✅ |
 | Sleep | `sleep` | 睡觉（A 入睡 · B 熟睡随机变体 · C 醒来） | ✅ |
 | Eat（夹心 back / front lay） | `common/eat` 夹心 | 吃饭：Core 挑的食物做精灵 | ✅ |
 | Eat/EatMcDonald | `common/eatmcdonald` | 每顿饭两成概率（普通动画，不用夹心） | ✅ |

@@ -23,7 +23,8 @@ VPet.Core（Rust，apps/desktop/src-tauri/src）
 ├── tts.rs               （语音合成 + 缓存）
 ├── lines.rs             （动作台词：固定 / 模型即兴）
 ├── kb.rs                （本机知识库只读：当天日程 · 到期复习，读它的 .kb/index.db）
-├── music.rs             （Spotify 在不在播：看主窗口标题；「放首歌」打开 spotify: + 媒体键）
+├── music.rs             （Spotify 在不在播：看主窗口标题 + 电平表；高潮检测；「放首歌」打开 spotify: + 媒体键）
+├── audio.rs             （系统输出峰值电平：WASAPI IAudioMeterInformation，裸 COM）
 ├── nudge.rs             （主动开口：由头 · 分量 · 每日预算 · 别烦我；纯规则）
 ├── pet_motion.rs        （自主移动 · 侧挂 · 窗口几何 · 出屏弹回）
 ├── dock.rs              （对话窗口贴边收起）
@@ -89,6 +90,7 @@ Core → Body（`emit`）：
 | `pet:said` | `Verdict` | 一次服从判定的结果 |
 | `pet:gift` | `{id, name}` | 收到礼物，拆一遍 |
 | `pet:motion` | 移动指令 | 自主走路 / 爬墙 / 侧挂 |
+| `pet:music` | `{playing, climax, level}` | 歌开始 / 停了 / 到高潮 / 过去了 |
 | `pet:shutdown-requested` | — | 托盘退出：Body 播退场后回调 `finish_shutdown`；Core 8 秒兜底 |
 | `chat:thinking` | `{requestId, active}` | 模型首字前开始 / 取消或失败时结束思考动画 |
 | `chat-stream` | `{requestId, delta, done, reset?}` | 对话流式输出 |

@@ -5,6 +5,7 @@ import { DEFAULT_CHAT_SETTINGS, errorText, invokeStrict } from '../chat/api'
 import type { ChatSettings, DesktopSettings, ModelStatus, Persona } from '../chat/api'
 import { Icon } from '../chat/Icons'
 import { VoiceSettingsTab } from './VoiceSettingsTab'
+import { NowHero } from './Panel'
 
 interface Gift { id: string; name: string; src: string; feeling: number; strengthFood: number; strengthDrink: number; price: number }
 type Tab = 'desktop' | 'persona' | 'voice' | 'model' | 'gifts'
@@ -66,7 +67,8 @@ export function CompanionSettings() {
     <nav className="settings-tabs" aria-label="设置类别">{tabs.map(item => <button key={item.id} className={tab === item.id ? 'active' : ''} aria-current={tab === item.id ? 'page' : undefined} onClick={() => { setTab(item.id); setNotice(''); setError('') }}><Icon name={item.icon} size={17} />{item.label}</button>)}</nav>
     <div className="settings-content">
       {tab === 'desktop' && <>
-        <div className="section-kicker">YOUR LITTLE CORNER</div><h2>刚刚好的陪伴距离</h2><p className="section-description">调到喜欢的大小，让她待在你觉得舒服的位置。</p>
+        <NowHero />
+        <div className="section-kicker">YOUR LITTLE CORNER · 刚刚好的陪伴距离</div><p className="section-description">调到喜欢的大小，让她待在你觉得舒服的位置。</p>
         <div className="desktop-preview"><div className="mini-desktop"><span /><span /><span /><div className="mini-document"><i /><i /><i /></div><img src="/avatar.png" alt="人物大小示意" style={{ width: 42 + desktop.size / 8 }} /></div><div><strong>{desktop.size} <small>px</small></strong><p>人物窗口大小</p></div></div>
         <label className="field-label" htmlFor="pet-size">显示大小<span>{Math.round(desktop.size / 5)}%</span></label>
         <input id="pet-size" className="range-input" type="range" min="200" max="800" step="10" value={desktop.size} onChange={e => setDesktop(s => ({ ...s, size: Number(e.target.value) }))} />

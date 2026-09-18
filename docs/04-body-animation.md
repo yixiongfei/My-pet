@@ -59,6 +59,7 @@ Core 定活动，Body 按这棵树挑画面：
 │   ├─ Play  → 打游戏 6–12 · 删错误 5–10 · 跳绳 3–6 · 玩水 5–10 · 网球 / 舞蹈 4–8
 │   └─ Sleep → 入睡（A）· 熟睡（B 随机变体）· 醒来（C）
 │   └─ 跳舞（你在放歌，Core 的 dance）→ ACTION_POOLS.music：Music 3–6 · Music2 2–4 · cosplay 2–4 · ohhhh 1–3
+│                                       歌到高潮（`pet:music` climax）→ 换成 ohhhh，过去了换回
 └─ 无任务（Idle）→ 发呆（default）· StateONE → StateTWO 成对待机 · 四处看 / 小动作（idel，15–40 s 一次）
                    · 日常（Relax/MI · MU · BDay，三成）· 飞吻（WORK/kiss，全身状态都很高时两成）· 走路 / 爬墙 / 坠落（pet_motion）
 ```

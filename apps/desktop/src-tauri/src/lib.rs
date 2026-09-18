@@ -7,6 +7,7 @@
 
 mod core;
 mod desktop_settings;
+mod audio;
 mod chat;
 mod dock;
 mod kb;
@@ -475,25 +476,60 @@ struct NudgeState {
     returned: Option<(Instant, f32)>,
     /// 她最近换过的事：(时刻 ms, 活动, 动作名)，给「你不在的时候我……」用
     her_recent: std::collections::VecDeque<(i64, Activity, String)>,
-    /// 上一次看到的「在不在放歌」，变了才发事件
+    /// 上一次看到的「在不在放歌」，变了才发事件；None = 还没看过（第一次一定发）
     music: Option<bool>,
     last_music_check: Option<Instant>,
+    /// Spotify 标题上一次是不是「在播」；只有它说在播才去听声音
+    title_playing: bool,
+    meter: music::Meter,
 }
 
-/// 你在不在放歌：每十秒看一次，变了才告诉状态机（她会去跳 / 停下）
+/// Body 的 `pet:music`：歌到没到高潮、现在多响
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MusicEvent {
+    playing: bool,
+    climax: bool,
+    level: f32,
+}
+
+/// 你在不在放歌：每十秒看一次 Spotify 的标题；标题说在播时每秒听一次声音——
+/// 连着二十秒没声就不算（Spotify Launcher 挂着、静音）；短时电平比长时均值猛涨就是高潮
 fn poll_music(app: &AppHandle) {
     let Some(ns) = app.try_state::<Mutex<NudgeState>>() else { return };
     let Ok(mut n) = ns.lock() else { return };
-    if n.last_music_check.is_some_and(|t| t.elapsed() < MUSIC_EVERY) {
-        return;
+    let now = now_ms();
+    if n.last_music_check.map_or(true, |t| t.elapsed() >= MUSIC_EVERY) {
+        n.last_music_check = Some(Instant::now());
+        let title = music::playing(now);
+        if title != n.title_playing {
+            n.title_playing = title;
+            n.meter.reset();
+        }
     }
-    n.last_music_check = Some(Instant::now());
-    let playing = music::playing(now_ms());
-    if n.music.unwrap_or(false) != playing {
+    let was_climax = n.meter.climax;
+    if n.title_playing {
+        if let Some(peak) = audio::peak() {
+            n.meter.sample(peak);
+        }
+    }
+    let playing = n.title_playing && !n.meter.silent();
+    let changed = n.music != Some(playing);
+    let climax_changed = n.meter.climax != was_climax;
+    if changed {
         n.music = Some(playing);
-        log::info!("音乐{}", if playing { "开始了" } else { "停了" });
-        drop(n);
+        log::info!("音乐{}（电平 {:.2}）", if playing { "开始了" } else { "停了" }, n.meter.fast);
+    }
+    if climax_changed {
+        log::info!("{}（fast {:.2} / slow {:.2}）", if n.meter.climax { "歌到高潮了" } else { "高潮过去了" }, n.meter.fast, n.meter.slow);
+    }
+    let ev = MusicEvent { playing, climax: playing && n.meter.climax, level: n.meter.fast };
+    drop(n);
+    if changed {
         apply(app, &Event::Music(playing));
+    }
+    if changed || climax_changed {
+        let _ = app.emit("pet:music", ev);
     }
 }
 

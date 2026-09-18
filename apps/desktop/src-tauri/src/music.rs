@@ -31,6 +31,65 @@ pub fn playing(now_ms: i64) -> bool {
     state == Some(SpotifyState::Playing)
 }
 
+/* --- 听声音：第二道确认 + 高潮 --- */
+
+/// 峰值低于这个算没声（0–1）。Spotify Launcher 挂着、标题却像在播的时候，这里是 0
+const SILENT_PEAK: f32 = 0.004;
+/// 标题说在播、但连着这么久没声，就当没在放（静音 / 假窗口）
+pub const SILENT_GRACE_SEC: u32 = 20;
+/// 高潮：短时电平 ≥ 长时均值的这么多倍，且绝对值够响；退出用更低的门槛，免得一句里抖来抖去
+const CLIMAX_RATIO_ON: f32 = 1.35;
+const CLIMAX_RATIO_OFF: f32 = 1.1;
+const CLIMAX_MIN_PEAK: f32 = 0.35;
+/// 长时均值至少这么大才谈得上高潮（刚开始放、还在淡入时不算）
+const CLIMAX_MIN_BASE: f32 = 0.06;
+/// 短时 / 长时 EMA 的系数（每秒采一次：快的约 2 秒，慢的约 45 秒）
+const EMA_FAST: f32 = 0.5;
+const EMA_SLOW: f32 = 0.022;
+
+/// 电平表：每秒喂一个峰值进来
+#[derive(Debug, Default, Clone)]
+pub struct Meter {
+    pub fast: f32,
+    pub slow: f32,
+    pub silent_for_sec: u32,
+    pub climax: bool,
+    samples: u32,
+}
+
+impl Meter {
+    pub fn sample(&mut self, peak: f32) {
+        self.samples += 1;
+        if self.samples == 1 {
+            self.fast = peak;
+            self.slow = peak;
+        } else {
+            self.fast += (peak - self.fast) * EMA_FAST;
+            self.slow += (peak - self.slow) * EMA_SLOW;
+        }
+        if peak < SILENT_PEAK {
+            self.silent_for_sec += 1;
+        } else {
+            self.silent_for_sec = 0;
+        }
+        let ratio = if self.slow > 0.0 { self.fast / self.slow } else { 0.0 };
+        self.climax = if self.climax {
+            self.fast >= CLIMAX_MIN_PEAK * 0.8 && ratio >= CLIMAX_RATIO_OFF
+        } else {
+            self.slow >= CLIMAX_MIN_BASE && self.fast >= CLIMAX_MIN_PEAK && ratio >= CLIMAX_RATIO_ON
+        };
+    }
+
+    /// 标题说在播，但声音这边不同意
+    pub fn silent(&self) -> bool {
+        self.silent_for_sec >= SILENT_GRACE_SEC
+    }
+
+    pub fn reset(&mut self) {
+        *self = Meter::default();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpotifyState {
     Playing,
@@ -176,6 +235,31 @@ fn press_media_play() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 电平表_没声就当没放_响起来算高潮() {
+        let mut m = Meter::default();
+        for _ in 0..SILENT_GRACE_SEC {
+            m.sample(0.0);
+        }
+        assert!(m.silent(), "二十秒没声");
+        m.sample(0.2);
+        assert!(!m.silent(), "有声了就不算静");
+
+        let mut m = Meter::default();
+        for _ in 0..60 {
+            m.sample(0.15); // 主歌：平稳
+        }
+        assert!(!m.climax);
+        for _ in 0..4 {
+            m.sample(0.6); // 副歌炸开
+        }
+        assert!(m.climax, "fast {} slow {}", m.fast, m.slow);
+        for _ in 0..30 {
+            m.sample(0.12); // 回落
+        }
+        assert!(!m.climax);
+    }
 
     #[test]
     fn 标题看得出在不在播() {

@@ -168,8 +168,9 @@ pub struct Pet {
     #[serde(default)]
     pub directive: Option<Directive>,
     /// 你在放音乐（lib.rs 每分钟看一次 Spotify 在不在播）。真的话她放下手头的活跟着跳，
-    /// 歌停了就回到作息。吃饭睡觉照旧压过它
-    #[serde(default)]
+    /// 歌停了就回到作息。吃饭睡觉照旧压过它。**不存档**：重启后以当时检测为准，
+    /// 否则关机前在跳舞、开机后没歌也接着跳
+    #[serde(skip)]
     pub music: bool,
 }
 
