@@ -3,6 +3,8 @@
 ## 未发布 · Phase 1「Body MVP」+ Phase 2 状态机
 
 ### 新增
+- **发布脚本** `pnpm release:github`（[scripts/publish-release.ps1](scripts/publish-release.ps1)）：干净工作区 → 测试 → 版本号写进四处 → CHANGELOG「未发布」改成本版 → `tauri build`（NSIS 安装包 + 便携 zip）→ `release: vX.Y.Z` 提交 + tag → push → `gh release create`（说明取自 CHANGELOG）→ 重新拉起桌宠。`-DryRun` 只打包不提交。
+- **本机只留正式版**：`pnpm clean`（[scripts/clean.ps1](scripts/clean.ps1)）清掉 debug 构建（10 GB）、前端 dist、TTS 引擎的旧 CPU 构建、探针音频、拉模型日志和桌面上残留的 exe 副本；正式版只有一份：`target\release\vpet.exe`。仓库也只剩一个远程 `origin` → My-pet。
 - **完整接回原版自主移动**：`pet.json` 的 16 条规则现在直接驱动 14 个走路 / 爬行 / 左右爬墙 / 顶部移动 / 坠落 graph（98 clips、534 帧）。TriggerType、CheckType、ModeType、Locate、125 ms 速度和 Distance 循环概率均按 `GraphHelper.Move` 实现；碰边有 40% 概率切到方向兼容动作，只有最终停止才播旧动作的 end。活动屏幕在一次移动开始时锁定，支持缩放、DPI 与负坐标副屏；触摸、说话和状态变化优先并立即中断。
 - **动画播放器代际隔离**：冷缓存解码期间开始新动作后，旧 clip 的结束回调不再读取新 target、吞掉新回调或抢播 loop；`playOnce` 也在 await 前绑定到自己的播放代际。start 中被要求停止时直接转 end，不再强制多播一轮。
 - **人物左右侧挂动画**：接回原版 `vup.lps` 的 `side.left/right` 锚点与 48 组 `SideHide_Left/Right_Main/Rise` 动画。提起人物拖出显示器左右边超过 50 个逻辑像素会挂到边缘；当前帧的不透明区域被鼠标碰到时播 Rise 探头，离开收回，按下则先把完整人物拉回屏幕。所有几何只按窗口底部 500×500 身体画布计算，头顶气泡区不参与锚点和越界判断；支持缩放、DPI 和负坐标副屏。
@@ -16,6 +18,7 @@
 - `scripts/release.ps1` / `pnpm check` / `pnpm release`：测试 → 类型检查 → 停桌宠 → 编 release → 拉起。CI 跑同一套。`CLAUDE.md` 写明改代码必须同步改 docs。
 
 ### 修复
+- **早上八点她还在睡**。根因是心跳按「拍数」走：`spawn_pet_clock` 每秒喂 1/60 分钟，电脑待机时这条线程和她一起停了，醒来后她接着睡「那一觉剩下的拍数」，作息的叫醒又要等体力回到 40 才放行。现在每一拍按墙上时钟算实际过了多久，超过两分钟就当时钟停过、走和重启时同一段离线补算（上限两小时）；`restore_state` 补算完把 `updated_at` 记成现在，免得第一拍再补一遍。顺手把睡眠时段改成 23–8 点（之前是 7 点）、一觉最多九小时——晚睡也会在 8 点被叫起来。
 - **正式版偶发编译失败 `os error 5`**：发布脚本不再用固定两秒猜进程何时退出；现在等待全部 `vpet.exe` 真正结束并复查，仍被占用就明确报出 PID，避免链接器覆盖运行中的 EXE。
 - **早上 7 点突然说话 / 声音重复**：7:00 同时是睡眠时段结束和早餐时段开始，自动动作台词过去会立刻出声；现在 23:00–08:00 的自动台词静音（用户设置的提醒、主动对话、送礼不受影响），同一动作十分钟内不复读。另修复启动器只按 exe 路径查重的问题，并在 Core 加跨路径单实例互斥量——桌面旧副本与仓库 release 不会再同时运行、把同一句送进 TTS 两遍。
 - **「本地模型返回了空回答」**：qwen3.x 在 think=false 下偶尔一开口就吐一个 `<think>`，而它是停止词——生成当场结束，什么都没有。不再当停止词，`clean_reply` 把 `<think>…</think>` 整段抠掉。

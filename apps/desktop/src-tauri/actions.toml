@@ -42,9 +42,9 @@ name = "睡觉"
 activity = "sleeping"
 graph = "sleep"
 tags = ["rest", "recover", "sleep"]
-duration = 420          # 一觉七小时
+duration = 540          # 一觉最多九小时：23 点躺下正好睡到 8 点；晚睡的话到 8 点也会被作息叫起来
 cooldown = 600
-hours = [[23, 7]]       # 夜里该睡了。白天累趴了也会睡——那走的是「生理急需」那条路
+hours = [[23, 8]]       # 夜里该睡了。白天累趴了也会睡——那走的是「生理急需」那条路
 per_min = { strength = 1.0, hunger = -0.12, thirst = -0.15, feeling = 0.1 }
 lines = ["困了……晚安。", "今天也辛苦了，睡觉去。", "眼睛睁不开了，我去睡啦。"]
 

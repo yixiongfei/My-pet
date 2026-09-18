@@ -14,7 +14,9 @@
     "web": "pnpm --filter @vpet/desktop dev",
     "typecheck": "pnpm -r --if-present typecheck",
     "check": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -CheckOnly",
-    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1"
+    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1",
+    "release:github": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish-release.ps1",
+    "clean": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/clean.ps1"
   },
   "devDependencies": {
     "sharp": "^0.34.3",

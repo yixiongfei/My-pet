@@ -297,7 +297,7 @@ const STRENGTH_PER_TOUCH: f32 = 0.2;
 /// 产品判断不是技术判断：离线衰减的目的是「感觉时间过去了」，不是「你冷落了我」。
 /// 满饱腹跑到零只要几小时，上限必须明显短于它，否则每天早上打开都是一只饿到脱力的
 /// 宠物——那是愧疚感机制，docs/01 写明情绪引擎只正向放大、不惩罚。
-const MAX_CATCHUP_MIN: f32 = 2.0 * 60.0;
+pub const MAX_CATCHUP_MIN: f32 = 2.0 * 60.0;
 
 /// 经验到等级。等级解锁更赚钱的活，也直接给一点收入加成——
 /// 「学习提高赚钱效率」这条因果链要看得见。
@@ -950,6 +950,32 @@ mod tests {
         let c = cat();
         let p = run(&c, Pet::default(), 5, 23.5);
         assert_eq!(p.state.activity, Activity::Sleeping, "凌晨该睡了");
+    }
+
+    #[test]
+    fn 早上八点会起床_哪怕时钟停过() {
+        // 23 点躺下，电脑随后待机到早上——期间一拍都没走。醒来第一拍在 8 点之后，
+        // 不管这一觉「按拍数」睡够没有，作息都该把她叫起来
+        let c = cat();
+        let mut p = run(&c, Pet::default(), 3, 23.0);
+        assert_eq!(p.state.activity, Activity::Sleeping, "前提：23 点该睡了");
+        p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0 / 60.0, hour: 8.05 });
+        assert_ne!(p.state.activity, Activity::Sleeping, "八点过了还在睡");
+        // 七点半还在睡觉时段里
+        let mut q = run(&c, Pet::default(), 3, 23.0);
+        q = reduce(&c, &shelf(), &q, &Event::Tick { minutes: 1.0 / 60.0, hour: 7.5 });
+        assert_eq!(q.state.activity, Activity::Sleeping, "七点半该还在睡");
+    }
+
+    #[test]
+    fn 待机醒来会把这段时间补上() {
+        // 和重启时一样走 catch_up：待机八小时，饱腹要掉、睡觉要睡够、到点要起床
+        let c = cat();
+        let mut p = run(&c, Pet::default(), 3, 23.0);
+        p.state.updated_at = 0;
+        let woke = catch_up(&c, &shelf(), &p, 8 * 60 * 60 * 1000, 9.0);
+        assert_ne!(woke.state.activity, Activity::Sleeping, "九点了还在睡");
+        assert!(woke.state.hunger < p.state.hunger, "待机期间也会饿");
     }
 
     #[test]

@@ -40,6 +40,13 @@ pnpm release           # 测试 → 编 release exe → 重启桌宠（scripts/r
 `pnpm release -- -SkipTests` 跳过测试只编译。日常启动用 `启动桌宠.cmd`（= `scripts/start-vpet.ps1`：拉起 Ollama、TTS、桌宠，缺模型会自动下载）。
 每次 push 都会在 GitHub Actions 上跑同一套测试（`.github/workflows/ci.yml`）。
 
+```bash
+pnpm release:github -- -Version 0.2.0   # 发正式版：打包 NSIS 安装包 + 便携 zip，打 tag，建 GitHub Release
+pnpm clean                              # 本机只留正式版：清掉 debug 构建、dist、旧的 TTS 构建和残留副本
+```
+
+发布前要 `gh auth login` 一次；不给 `-Version` 就把补丁号 +1，`-DryRun` 只打包不提交。安装包里带着角色美术，仅供个人使用。
+
 想让她出声，再跑一次 `scripts/setup-tts.ps1`（用 VS Build Tools 自带的 CMake 编译 qwentts.cpp，下载 Qwen3-TTS 权重；可选）。
 
 语义检索默认走本机 Ollama 的 embedding 接口（`qwen3-embedding:0.6b`），编译期不下载任何东西。
@@ -51,6 +58,7 @@ pnpm release           # 测试 → 编 release exe → 重启桌宠（scripts/r
   把人物拖出屏幕左 / 右边超过约 50 个角色像素，她会用原版 `SideHide` 动画挂在边缘；鼠标移上去会探头，按下便完整回到屏幕内。
   真正空闲时她也会自己走路、爬行、爬墙或从高处落下；到屏幕边缘会按原版规则衔接方向兼容的动作，任何触摸、对话或状态变化都会立即打断移动。
   对话窗口拖到屏幕左右边缘会**吸附并自动收起**（只留一条边，鼠标碰到再滑出来）；自己发过的话悬浮可「重新发送」。
+- 作息：23 点睡到早上 8 点（`actions.toml` 的 `sleep`），到点吃饭、上班、学习、玩；电脑待机再唤醒会把这段时间补上，不会早上还赖床。
 - 她说的话浮在**头顶的气泡**里；「帮我设个番茄钟，学习一个小时」「十分钟后叫我」会在头顶挂一个**倒计时环**，到点提醒。
 - 设置里可以调**显示大小**（200–800 px）、是否**始终置顶**，写她的**名字 / 背景 / 形象 / 性格 / 说话方式**，选一件**礼物**送她。
 - 对话跑在本机 [Ollama](https://ollama.com) 上（默认 `qwen3.5:9b`，6.6 GB），不联网、不上传。为避免重复占用磁盘，启动器只维护当前配置的模型，不再随包保留第二套 4B 权重。

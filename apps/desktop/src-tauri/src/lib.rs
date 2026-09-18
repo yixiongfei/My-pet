@@ -33,7 +33,7 @@ use core::memory::{
 };
 use std::collections::HashMap;
 use core::obey::Verdict;
-use core::state_machine::{catch_up, reduce, Directive, Event, Pet, PetState, Touch};
+use core::state_machine::{catch_up, reduce, Directive, Event, Pet, PetState, Touch, MAX_CATCHUP_MIN};
 
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem},
@@ -67,6 +67,9 @@ const TICK: Duration = Duration::from_secs(1);
 const SYNC_EVERY: Duration = Duration::from_secs(30);
 /// 状态落库的间隔。一分钟一条，掉电最多丢一分钟的数值
 const PERSIST_EVERY: Duration = Duration::from_secs(60);
+/// 两拍之间隔了这么久就当时钟停过（待机 / 休眠），改按离线补算。
+/// 正常一拍一秒；系统卡一下也到不了两分钟
+const STALL_MIN: f32 = 2.0;
 
 /// 鼠标穿透的判定状态。
 ///
@@ -227,16 +230,26 @@ fn spawn_pet_clock(app: AppHandle) {
             let Ok(mut st) = pet.lock() else { continue };
             let before = st.state.clone();
 
-            let mut next = reduce(
-                &cat,
-                &shelf,
-                &st,
-                &Event::Tick {
-                    minutes: TICK.as_secs_f32() / 60.0,
-                    hour: hour_now(),
-                },
-            );
-            next.state.updated_at = now_ms();
+            // 按墙上时钟算这一拍有多长，而不是假设「上一拍是一秒前」：电脑待机的时候
+            // 这条线程和她一起停了，醒来时可能已经过了一夜——按一秒算的话她会接着「睡」
+            // 那一觉剩下的拍数，早上八点还躺着。和重启时的补算走同一段代码、同一个上限
+            let now = now_ms();
+            let gap_min = (now - st.state.updated_at) as f32 / 60_000.0;
+            let mut next = if st.state.updated_at > 0 && gap_min >= STALL_MIN {
+                log::info!("时钟停了 {gap_min:.0} 分钟（待机？），补算 {:.0} 分钟", gap_min.min(MAX_CATCHUP_MIN));
+                catch_up(&cat, &shelf, &st, now, hour_now())
+            } else {
+                reduce(
+                    &cat,
+                    &shelf,
+                    &st,
+                    &Event::Tick {
+                        minutes: TICK.as_secs_f32() / 60.0,
+                        hour: hour_now(),
+                    },
+                )
+            };
+            next.state.updated_at = now;
             *st = next.clone();
             drop(st);
 
@@ -401,13 +414,15 @@ fn restore_state(app: &AppHandle, cat: &Catalog, shelf: &FoodShelf) -> Pet {
     };
     let restored = match db.latest_pet_state() {
         Ok(Some(p)) => {
-            let after = catch_up(cat, shelf, &p, now_ms(), hour_now());
+            let mut after = catch_up(cat, shelf, &p, now_ms(), hour_now());
             log::info!(
                 "读回上次状态（距今 {:.0} 分钟）：饱腹 {:.0} → {:.0}",
                 (now_ms() - p.state.updated_at) as f32 / 60_000.0,
                 p.state.hunger,
                 after.state.hunger
             );
+            // 补算过的时间就是「现在」——否则心跳的第一拍会把同一段离线又补一遍
+            after.state.updated_at = now_ms();
             after
         }
         Ok(None) => Pet::default(),

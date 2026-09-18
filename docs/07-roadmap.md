@@ -152,7 +152,7 @@ Phase 8  打磨与发布            ─  v4
 | 语音 TTS | ✅ Qwen3-TTS，`tts.rs`；STT ⬜ |
 | 移动 / 爬墙动画 | ✅ 16 条原版规则驱动走路 / 爬行 / 左右爬墙 / 顶部移动 / 坠落（98 clips / 534 帧）；左右 SideHide 拖出吸附、hover 探头、按下恢复（48 clips / 254 帧） |
 | 开机自启 | ⬜ |
-| 安装包（NSIS） | 🚧 `tauri build` 配好了，没验证过安装流程；日常用 `pnpm release` 出 exe |
+| 安装包（NSIS） | ✅ `pnpm release:github` 打包安装包 + 便携 zip 并建 GitHub Release；日常用 `pnpm release` 出 exe |
 | 崩溃日志 | ⬜（只有 stderr 落 `.runtime/vpet-error.log`） |
 | 性能看板 | ⬜ |
 | CI | ✅ `.github/workflows/ci.yml`：cargo test + typecheck |

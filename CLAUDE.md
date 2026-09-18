@@ -15,6 +15,8 @@
 
 - 提交前：`pnpm check`（cargo test + typecheck）。
 - 发布到桌面：`pnpm release`（停桌宠 → 编 release exe → `start-vpet.ps1` 拉起 Ollama、tts-server、桌宠）。正在跑的 release exe 会占住链接器，脚本会先停它。
+- 发正式版到 GitHub：`pnpm release:github -- -Version X.Y.Z`（要求工作区干净、gh 已登录；会改版本号、切 CHANGELOG、打 tag、建 Release）。本机只留正式版：`pnpm clean`。
+- 只有一个远程 `origin`（github.com/yixiongfei/My-pet）；正式版 exe 只在 `apps/desktop/src-tauri/target/release/`，别复制到桌面。
 - 语音引擎 / 模型权重 / Ollama 都在 `.runtime/`（不入库）；`scripts/setup-tts.ps1` 只需跑一次。
 - 角色美术 `assets-src/` 归原作者，不入库；`legacy/` 是原版 C# 只读参考，不入库。
 
