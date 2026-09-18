@@ -235,7 +235,7 @@ fn parse_do_zh(t: &str) -> Option<Intent> {
 }
 
 /// 从「玩十分钟吧」里抠出 10，返回 (分钟, 去掉时长后的剩余文本)
-fn duration_zh(after: &str) -> (Option<f32>, String) {
+pub(crate) fn duration_zh(after: &str) -> (Option<f32>, String) {
     let mut rest = after.to_string();
     let mut minutes = None;
     // 数字 + 单位

@@ -121,8 +121,8 @@ export function Chat() {
     <header className="chat-header">
       <div className="companion-identity">
         <div className="portrait portrait-small"><img src="/avatar.png" alt={`${settings.persona.name}的头像`} /></div>
-        <div><h1>{settings.persona.name}<span className="identity-tag">桌面伙伴</span></h1>
-          <p><span className={`status-dot ${connected ? 'is-online' : ''}`} />{!IS_TAURI ? '界面预览' : connected ? '本地陪伴 · 对话留在这台电脑' : status ? '本地模型待连接' : '正在连接本地模型'}</p>
+        <div><h1>{settings.persona.name}<span className="identity-tag"></span></h1>
+          <p><span className={`status-dot ${connected ? 'is-online' : ''}`} />{!IS_TAURI ? '界面预览' : connected ? '' : status ? '本地模型待连接' : '正在连接本地模型'}</p>
         </div>
       </div>
       <button className="icon-button" title="个性与设置" aria-label="个性与设置" onClick={() => void openSettings()}><Icon name="settings" size={21} /></button>

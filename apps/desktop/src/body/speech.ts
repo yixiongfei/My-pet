@@ -14,6 +14,8 @@ export interface VoicePrefs {
 interface Item {
   kind: SpeechKind
   audio: Promise<Blob | null>
+  /** 0–1；自言自语轻声（Core 给的，默认 1） */
+  volume: number
 }
 
 /** 句末：到这里就可以先送去合成，不用等整段回复说完 */
@@ -49,7 +51,7 @@ export class Speech {
    * 排一句。`interrupt` = 把还没说完的都扔掉（新的回复来了，旧的就别念了）。
    * 不允许出声的类型直接忽略——气泡照出，只是没声音
    */
-  say(text: string, kind: SpeechKind, opts: { interrupt?: boolean; mood?: string } = {}): void {
+  say(text: string, kind: SpeechKind, opts: { interrupt?: boolean; mood?: string; volume?: number } = {}): void {
     if (this.disposed || !this.allows(kind)) return
     const clean = text.trim()
     if (!clean) return
@@ -59,7 +61,7 @@ export class Speech {
     const audio = invokeCore<ArrayBuffer>('tts_speak', { text: clean, mood: opts.mood })
       .then((buf) => (buf && buf.byteLength > 44 ? new Blob([buf], { type: 'audio/wav' }) : null))
       .catch(() => null)
-    this.queue.push({ kind, audio })
+    this.queue.push({ kind, audio, volume: Math.min(1, Math.max(0, opts.volume ?? 1)) })
     void this.pump()
   }
 
@@ -120,7 +122,7 @@ export class Speech {
         if (this.disposed || this.queue[0] !== item) continue
         this.queue.shift()
         if (!blob) continue
-        await this.play(blob)
+        await this.play(blob, item.volume)
       }
     } finally {
       this.pumping = false
@@ -131,11 +133,12 @@ export class Speech {
     }
   }
 
-  private play(blob: Blob): Promise<void> {
+  private play(blob: Blob, volume = 1): Promise<void> {
     return new Promise((resolve) => {
       this.stopCurrent()
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
+      audio.volume = volume
       audio.playbackRate = Math.min(1.6, Math.max(0.7, this.prefs.speed || 1))
       audio.preservesPitch = this.prefs.keepPitch
       this.current = audio

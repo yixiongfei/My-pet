@@ -683,6 +683,15 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
         store.insert(&message(format!("{request_id}-user"), "user", text.clone(), "model", "complete"), None)?;
         Ok((settings, history))
     })?;
+    // 你开口了：她上一句搭话算有回应（预算按这个调）
+    crate::nudge_user_reacted(&app);
+    // 「别烦我」：规则直接静音、固定回复，不经模型——这是刹车，刹车不能靠概率
+    if let Some(reply) = crate::quiet_command(&app, &text) {
+        let response = message(format!("{request_id}-assistant"), "assistant", reply, "intent", "complete");
+        with_store(&app, |store| store.insert(&response, None))?;
+        let _ = app.emit("chat-stream", StreamEvent { request_id, delta: response.content.clone(), done: false, text: None, reset: false });
+        return Ok(response);
+    }
     // This deterministic command path must run before ordinary model inference.
     if let Some(reply) = crate::memory_command(app.clone(), text.clone()) {
         let response = message(format!("{request_id}-assistant"), "assistant", reply, "memory", "complete");

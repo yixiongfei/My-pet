@@ -168,6 +168,7 @@ fn pet_touched(app: AppHandle, zone: String) {
         }
     };
     apply(&app, &Event::Touched(touch));
+    nudge_user_reacted(&app);
 }
 
 /// 调试：直接改数值，用来验证阈值行为（把 hunger 调低看它去不去吃）
@@ -314,8 +315,11 @@ fn spawn_pet_clock(app: AppHandle) {
             let changed = acted != acted_before || next.state.mood != before.mood;
             // 换了件事做就说一句。「你让我做的」不用：答应的那句话已经说过了
             if acted != acted_before {
-                if let Some(a) = next.state.action.as_ref().filter(|a| a.reason != "你让我做的") {
-                    lines::announce(&app, a, false);
+                if let Some(a) = next.state.action.as_ref() {
+                    note_her_action(&app, next.state.activity, &a.name);
+                    if a.reason != "你让我做的" {
+                        lines::announce(&app, a, false);
+                    }
                 }
             }
             if changed || last_sync.elapsed() >= SYNC_EVERY {
@@ -442,23 +446,31 @@ fn cancel_focus(app: AppHandle) -> bool {
     true
 }
 
-/* ==================== 主动提醒 ==================== */
+/* ==================== 主动开口 ==================== */
 
-/// 多久看一次日程。提醒的粒度是分钟，没必要每拍都去开知识库
+/// 多久看一次。粒度是分钟，没必要每拍都去开知识库
 const NUDGE_EVERY: Duration = Duration::from_secs(60);
-/// 提醒的静音时段（钟点）：和作息、台词一致——夜里她睡了，你也该睡了
+/// 静音时段（钟点）：和作息、台词一致——夜里她睡了，你也该睡了
 const NUDGE_QUIET_FROM: f32 = 23.0;
 const NUDGE_QUIET_UNTIL: f32 = 8.0;
+/// 连续活跃的判定：这么久没动键鼠就算这一段断了（秒）
+const STREAK_BREAK_SEC: u32 = 300;
+/// 「你不在的时候她干了什么」最多记这么多条
+const HER_RECENT_MAX: usize = 30;
 
-/// 提醒的账本：今天说过哪些、上一条什么时候。`said` 同时落在 `kv` 里，重启不重复
+/// 主动开口的账本 + 你在不在的模型。账本（`DayBook`）按天落在 `kv`，重启不重复
 #[derive(Default)]
 struct NudgeState {
-    day: String,
-    said: std::collections::HashSet<String>,
-    last_said: Option<Instant>,
+    book: nudge::DayBook,
     last_check: Option<Instant>,
     /// 最近一次从待机醒来（时钟停过）。醒来头几分钟不开口
     woke_at: Option<Instant>,
+    /// 你在不在：上一次检查时的空闲秒数、这段连续活跃从何时开始、最近一次「回来」
+    last_idle_sec: Option<u32>,
+    streak_since: Option<Instant>,
+    returned: Option<(Instant, f32)>,
+    /// 她最近换过的事：(时刻 ms, 活动, 动作名)，给「你不在的时候我……」用
+    her_recent: std::collections::VecDeque<(i64, Activity, String)>,
 }
 
 /// 你多久没动键鼠了（秒）。读不到就当「不知道」——调用方按不在处理
@@ -492,7 +504,134 @@ fn idle_seconds() -> Option<u32> {
     None
 }
 
-/// 心跳每分钟来问一次：现在该不该提醒。这里只管「能不能开口」的门——
+/// 物理内存占用百分比。读不到当满载——让模型嘀咕是锦上添花，不确定就别添
+#[cfg(target_os = "windows")]
+fn memory_load_percent() -> u32 {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        dw_length: u32,
+        dw_memory_load: u32,
+        ull_total_phys: u64,
+        ull_avail_phys: u64,
+        ull_total_page_file: u64,
+        ull_avail_page_file: u64,
+        ull_total_virtual: u64,
+        ull_avail_virtual: u64,
+        ull_avail_extended_virtual: u64,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalMemoryStatusEx(buf: *mut MemoryStatusEx) -> i32;
+    }
+    let mut m = MemoryStatusEx {
+        dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        dw_memory_load: 0,
+        ull_total_phys: 0,
+        ull_avail_phys: 0,
+        ull_total_page_file: 0,
+        ull_avail_page_file: 0,
+        ull_total_virtual: 0,
+        ull_avail_virtual: 0,
+        ull_avail_extended_virtual: 0,
+    }
+    ;
+    // SAFETY: 结构体按 Win32 的 MEMORYSTATUSEX 布局，dwLength 已填
+    unsafe {
+        if GlobalMemoryStatusEx(&mut m) == 0 {
+            return 100;
+        }
+    }
+    m.dw_memory_load
+}
+
+#[cfg(not(target_os = "windows"))]
+fn memory_load_percent() -> u32 {
+    100
+}
+
+fn today_str() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// 账本换天：读回今天的（重启后），或者按昨天的反应开一本新的
+fn open_book(app: &AppHandle, n: &mut NudgeState, today: &str, base_budget: u32) {
+    if n.book.date == today {
+        return;
+    }
+    let db = app.try_state::<Mutex<Db>>();
+    let load = |key: &str| -> Option<nudge::DayBook> {
+        db.as_ref()
+            .and_then(|db| db.lock().ok().and_then(|d| d.kv_get(key)))
+            .and_then(|json| serde_json::from_str(&json).ok())
+    };
+    if let Some(b) = load(&format!("nudge:day:{today}")) {
+        n.book = b;
+        return;
+    }
+    let yesterday = chrono::Local::now()
+        .date_naive()
+        .pred_opt()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .and_then(|d| load(&format!("nudge:day:{d}")));
+    n.book = nudge::DayBook::open(today, base_budget, yesterday.as_ref());
+    log::info!("今天的搭话预算：{} 次", n.book.limit);
+}
+
+fn save_book(app: &AppHandle, book: &nudge::DayBook) {
+    let Some(db) = app.try_state::<Mutex<Db>>() else { return };
+    let Ok(d) = db.lock() else { return };
+    let json = serde_json::to_string(book).unwrap_or_else(|_| "{}".into());
+    if let Err(e) = d.kv_put(&format!("nudge:day:{}", book.date), &json) {
+        log::warn!("提醒账本没记上：{e}");
+    }
+}
+
+/// 你在不在、待了多久、刚回来没有——全部从「多久没动键鼠」推出来。每分钟一次
+fn observe_presence(n: &mut NudgeState, idle: u32, idle_max: u32) {
+    let now = Instant::now();
+    let was_away = n.last_idle_sec.is_some_and(|i| i as f32 / 60.0 >= nudge::AWAY_MIN);
+    let present = idle <= idle_max;
+    if present {
+        if was_away {
+            // 刚回来：离开了多久按上一次看到的空闲时长算
+            n.returned = Some((now, n.last_idle_sec.unwrap_or(0) as f32 / 60.0));
+            n.streak_since = Some(now);
+        }
+        if n.streak_since.is_none() || idle > STREAK_BREAK_SEC {
+            n.streak_since = Some(now);
+        }
+    } else if idle > STREAK_BREAK_SEC {
+        n.streak_since = None;
+    }
+    n.last_idle_sec = Some(idle);
+}
+
+/// 她最近换了件事做。心跳里动作变化时记一笔，「你回来啦」要用
+fn note_her_action(app: &AppHandle, activity: Activity, name: &str) {
+    let Some(ns) = app.try_state::<Mutex<NudgeState>>() else { return };
+    let Ok(mut n) = ns.lock() else { return };
+    n.her_recent.push_back((now_ms(), activity, name.to_string()));
+    while n.her_recent.len() > HER_RECENT_MAX {
+        n.her_recent.pop_front();
+    }
+}
+
+/// 你不在的这段时间她干过的正事（去重、按时间）
+fn her_recent_while_away(n: &NudgeState, since_ms: i64) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (at, activity, name) in n.her_recent.iter() {
+        if *at < since_ms || !matches!(activity, Activity::Working | Activity::Studying | Activity::Playing) {
+            continue;
+        }
+        if !out.iter().any(|x| x == name) {
+            out.push(name.clone());
+        }
+    }
+    out.truncate(3);
+    out
+}
+
+/// 心跳每分钟来问一次：现在该不该开口。这里只管「能不能开口」的门——
 /// 开着、白天、她醒着、你在、不是刚从待机醒来——说什么由 `nudge::pick` 定
 fn check_nudges(app: &AppHandle, state: &PetState) {
     let Some(ns) = app.try_state::<Mutex<NudgeState>>() else { return };
@@ -503,6 +642,10 @@ fn check_nudges(app: &AppHandle, state: &PetState) {
     n.last_check = Some(Instant::now());
 
     let Ok(settings) = chat::current_settings(app) else { return };
+    let idle_max = settings.nudges.idle_max_sec;
+    let idle = idle_seconds();
+    observe_presence(&mut n, idle.unwrap_or(u32::MAX / 2), idle_max);
+
     if !settings.nudges.enabled || !settings.lines.enabled {
         return;
     }
@@ -514,61 +657,77 @@ fn check_nudges(app: &AppHandle, state: &PetState) {
         return;
     }
     // 人不在就不说：说了也没人听，回来看到一堆气泡才是吵
-    match idle_seconds() {
-        Some(idle) if idle <= settings.nudges.idle_max_sec => {}
-        _ => return,
-    }
-    let Some(db_path) = kb::locate() else { return };
-
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    if n.day != today {
-        n.day = today.clone();
-        n.said = app
-            .try_state::<Mutex<Db>>()
-            .and_then(|db| db.lock().ok().and_then(|d| d.kv_get(&format!("nudge:said:{today}"))))
-            .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default();
-        n.last_said = None;
-    }
-
-    let agenda = match kb::agenda(&db_path, &today) {
-        Ok(a) => a,
-        Err(e) => {
-            log::warn!("读不到知识库日程：{e}");
-            return;
-        }
-    };
-    let minute_of_day = (hour * 60.0) as u32;
-    let since_last = n.last_said.map(|t| t.elapsed().as_secs_f32() / 60.0);
-    let Some(pick) = nudge::pick(&agenda, minute_of_day, &n.said, since_last, settings.nudges.lead_min) else { return };
-    drop(n);
-    deliver_nudge(app, pick, &today);
-}
-
-/// 说出去、记账、顺手写记忆。`check_nudges` 和「你主动问今天安排」共用
-fn deliver_nudge(app: &AppHandle, pick: nudge::Nudge, today: &str) {
-    // 事实交给模型用她的口吻说；模型不在 / 超时 / 改丢了时间就说原句
-    if !lines::say_in_character(app, "nudge", &pick.text) {
+    if !matches!(idle, Some(i) if i <= idle_max) {
         return;
     }
-    if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
-        if let Ok(mut n) = ns.lock() {
-            if n.day != today {
-                n.day = today.to_string();
-                n.said.clear();
-            }
-            n.said.insert(pick.key.clone());
-            n.last_said = Some(Instant::now());
-            if let Some(db) = app.try_state::<Mutex<Db>>() {
-                if let Ok(d) = db.lock() {
-                    let json = serde_json::to_string(&n.said).unwrap_or_else(|_| "[]".into());
-                    if let Err(e) = d.kv_put(&format!("nudge:said:{today}"), &json) {
-                        log::warn!("提醒账本没记上：{e}");
-                    }
+
+    let today = today_str();
+    open_book(app, &mut n, &today, settings.nudges.daily_budget);
+    let now = now_ms();
+    n.book.settle(now);
+
+    let agenda = kb::locate()
+        .and_then(|db| kb::agenda(&db, &today).map_err(|e| log::warn!("读不到知识库日程：{e}")).ok())
+        .unwrap_or_else(|| kb::Agenda { date: today.clone(), ..Default::default() });
+    let back_for_min = n.returned.map(|(at, _)| at.elapsed().as_secs_f32() / 60.0).unwrap_or(f32::MAX / 2.0);
+    let just_back_after_min = n
+        .returned
+        .filter(|(at, _)| at.elapsed().as_secs_f32() / 60.0 <= nudge::BACK_WINDOW_MIN)
+        .map(|(_, away)| away);
+    let her_recent = n
+        .returned
+        .map(|(at, away)| now - at.elapsed().as_millis() as i64 - (away * 60_000.0) as i64)
+        .map(|since| her_recent_while_away(&n, since))
+        .unwrap_or_default();
+    let focus_running = app
+        .try_state::<Mutex<Scheduler>>()
+        .and_then(|s| s.lock().ok().map(|s| s.focus().is_some()))
+        .unwrap_or(false)
+        || app.try_state::<Mutex<Pomodoro>>().and_then(|p| p.lock().ok().map(|p| p.is_running())).unwrap_or(false);
+    let moment = nudge::Moment {
+        now_ms: now,
+        minute_of_day: (hour * 60.0) as u32,
+        just_back_after_min,
+        back_for_min,
+        active_streak_min: n.streak_since.map(|t| t.elapsed().as_secs_f32() / 60.0).unwrap_or(0.0),
+        focus_running,
+        her_recent,
+        memory_load: memory_load_percent(),
+    };
+
+    if let Some(pick) = nudge::pick(&agenda, &moment, &n.book, settings.nudges.lead_min) {
+        n.book.record(&pick, now);
+        save_book(app, &n.book);
+        drop(n);
+        deliver_nudge(app, pick, &settings);
+        return;
+    }
+    // 没有正事要说：隔一阵子让她自己嘀咕一句（模型写；内存紧就算了）
+    if nudge::mumble_due(&n.book, &moment, settings.nudges.self_talk) {
+        let avoid: Vec<String> = n.book.mumbles.iter().cloned().collect();
+        n.book.last_mumble_ms = Some(now); // 先占位，免得模型慢的时候连发
+        save_book(app, &n.book);
+        drop(n);
+        let volume = settings.nudges.quiet_volume;
+        let app = app.clone();
+        lines::mumble(&app.clone(), avoid, volume, move |text| {
+            if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
+                if let Ok(mut n) = ns.lock() {
+                    n.book.note_mumble(&text, now_ms());
+                    save_book(&app, &n.book);
                 }
             }
-        }
+        });
     }
+}
+
+/// 说出去、顺手写记忆。账本已经由调用方记过了
+fn deliver_nudge(app: &AppHandle, pick: nudge::Nudge, settings: &chat::ChatSettings) {
+    let (level, volume) = match pick.level {
+        nudge::Level::Talk => ("talk", 1.0),
+        nudge::Level::SelfTalk => ("self", settings.nudges.quiet_volume),
+    };
+    lines::say_in_character(app, "nudge", &pick.text, level, volume);
     // 今天的安排顺手写进她的记忆（system_event，当天过期）：被问「今晚学什么」答得上来。
     // 同一天再写会更新同一条，不会堆一摞
     if let Some(text) = pick.remember {
@@ -583,18 +742,74 @@ fn deliver_nudge(app: &AppHandle, pick: nudge::Nudge, today: &str) {
     }
 }
 
-/// 你主动要她说今天的安排（托盘 / 面板）：不看钟点、不看说没说过。返回她说的那句
+/// 你有了动作（发消息、摸她）：上一条搭话算回应了。预算按这个调
+pub(crate) fn nudge_user_reacted(app: &AppHandle) {
+    let Some(ns) = app.try_state::<Mutex<NudgeState>>() else { return };
+    let Ok(mut n) = ns.lock() else { return };
+    if n.book.awaiting.is_some() {
+        n.book.user_reacted(now_ms());
+        save_book(app, &n.book);
+    }
+}
+
+/// 「别烦我」「安静一小时」：规则直接静音，回一句固定的话，不经模型。
+/// 返回 None = 这句不是静音命令
+pub(crate) fn quiet_command(app: &AppHandle, text: &str) -> Option<String> {
+    if nudge::parse_unquiet(text) {
+        if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
+            if let Ok(mut n) = ns.lock() {
+                n.book.muted_until_ms = 0;
+                save_book(app, &n.book);
+            }
+        }
+        return Some("好，那我想说就说啦。".into());
+    }
+    let minutes = nudge::parse_quiet(text)?;
+    let now = now_ms();
+    let until = match minutes {
+        Some(m) => now + (m.clamp(1.0, 24.0 * 60.0) * 60_000.0) as i64,
+        None => chrono::Local::now().date_naive().and_hms_opt(23, 59, 59)
+            .and_then(|t| t.and_local_timezone(chrono::Local).single())
+            .map(|t| t.timestamp_millis())
+            .unwrap_or(now + 12 * 3_600_000),
+    };
+    if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
+        if let Ok(mut n) = ns.lock() {
+            let today = today_str();
+            let budget = chat::current_settings(app).map(|s| s.nudges.daily_budget).unwrap_or(nudge::DAILY_BUDGET);
+            open_book(app, &mut n, &today, budget);
+            n.book.mute(until);
+            save_book(app, &n.book);
+        }
+    }
+    log::info!("静音到 {until}");
+    Some(match minutes {
+        Some(m) if m < 60.0 => format!("好，{:.0} 分钟内我不吵你。", m),
+        Some(m) => format!("好，{}我不吵你。", if (m - 60.0).abs() < 1.0 { "这一小时".to_string() } else { format!("这 {:.1} 小时", m / 60.0) }),
+        None => "好，今天我不吵你了。".into(),
+    })
+}
+
+/// 你主动要她说今天的安排（托盘 / 面板）：不看钟点、不看说没说过，也不占预算
 #[tauri::command]
 fn say_agenda(app: AppHandle) -> Result<String, String> {
     let db = kb::locate().ok_or("这台电脑上没找到知识库")?;
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today = today_str();
     let agenda = kb::agenda(&db, &today)?;
+    let settings = chat::current_settings(&app)?;
     let Some(pick) = nudge::brief_now(&agenda) else {
         lines::say(&app, "nudge", "今天没排事，也没有要复习的。");
         return Ok("今天没排事，也没有要复习的。".into());
     };
     let text = pick.text.clone();
-    deliver_nudge(&app, pick, &today);
+    if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
+        if let Ok(mut n) = ns.lock() {
+            open_book(&app, &mut n, &today, settings.nudges.daily_budget);
+            n.book.said.insert(pick.key.clone()); // 早上就不用再概览一遍了
+            save_book(&app, &n.book);
+        }
+    }
+    deliver_nudge(&app, pick, &settings);
     Ok(text)
 }
 
@@ -602,8 +817,37 @@ fn say_agenda(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn kb_agenda() -> Option<kb::Agenda> {
     let db = kb::locate()?;
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    kb::agenda(&db, &today).map_err(|e| log::warn!("读不到知识库日程：{e}")).ok()
+    kb::agenda(&db, &today_str()).map_err(|e| log::warn!("读不到知识库日程：{e}")).ok()
+}
+
+/// 调试：让她现在就嘀咕一句（不看间隔和内存）。看模型写出来像不像自言自语
+#[tauri::command]
+fn mumble_now(app: AppHandle) {
+    let (avoid, volume) = {
+        let avoid = app
+            .try_state::<Mutex<NudgeState>>()
+            .and_then(|ns| ns.lock().ok().map(|n| n.book.mumbles.iter().cloned().collect::<Vec<_>>()))
+            .unwrap_or_default();
+        let volume = chat::current_settings(&app).map(|s| s.nudges.quiet_volume).unwrap_or(nudge::QUIET_VOLUME);
+        (avoid, volume)
+    };
+    let app2 = app.clone();
+    lines::mumble(&app, avoid, volume, move |text| {
+        if let Some(ns) = app2.try_state::<Mutex<NudgeState>>() {
+            if let Ok(mut n) = ns.lock() {
+                n.book.note_mumble(&text, now_ms());
+                save_book(&app2, &n.book);
+            }
+        }
+    });
+}
+
+/// 面板 / 调试：今天的账本（预算、说过什么、静音到几点）
+#[tauri::command]
+fn nudge_book(app: AppHandle) -> Option<nudge::DayBook> {
+    let ns = app.try_state::<Mutex<NudgeState>>()?;
+    let n = ns.lock().ok()?;
+    Some(n.book.clone())
 }
 
 /// 落一条状态流水。存不进去不该影响宠物继续跑——大不了这次的数值丢了
@@ -1839,6 +2083,8 @@ pub fn run() {
             list_medicines,
             kb_agenda,
             say_agenda,
+            nudge_book,
+            mumble_now,
             tts_speak,
             tts_status,
             list_actions,

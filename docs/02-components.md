@@ -23,7 +23,7 @@ VPet.Core（Rust，apps/desktop/src-tauri/src）
 ├── tts.rs               （语音合成 + 缓存）
 ├── lines.rs             （动作台词：固定 / 模型即兴）
 ├── kb.rs                （本机知识库只读：当天日程 · 到期复习，读它的 .kb/index.db）
-├── nudge.rs             （主动提醒：确定性规则，一句话、按天记账、人在才说）
+├── nudge.rs             （主动开口：由头 · 分量 · 每日预算 · 别烦我；纯规则）
 ├── pet_motion.rs        （自主移动 · 侧挂 · 窗口几何 · 出屏弹回）
 ├── dock.rs              （对话窗口贴边收起）
 └── desktop_settings.rs  （显示大小 · 置顶）
@@ -71,7 +71,7 @@ Body → Core（`invoke`，节选）：
 |---|---|
 | 状态 | `get_pet_state` `pet_touched` `request_action` `get_directive` `debug_patch_pet_state` |
 | 照顾 | `give_gift` `list_gifts` `give_medicine` `list_medicines` `set_food_catalog` |
-| 日程 | `kb_agenda`（今天的日程）`say_agenda`（让她说一遍今天的安排） |
+| 日程 / 主动 | `kb_agenda`（今天的日程）`say_agenda`（让她说一遍今天的安排）`nudge_book`（今天的账本）`mumble_now`（调试：嘀咕一句） |
 | 时间 | `create_timer` `cancel_timer` `list_timers` `start_pomodoro` `stop_pomodoro` `start_focus_session` `cancel_focus` `get_focus` |
 | 对话 | `send_chat_message` `cancel_chat` `list_chat_messages` `rate_chat_message` `get_chat_settings` `save_chat_settings` `export_training_data` |
 | 声音 | `tts_speak` `tts_status` `list_actions` `draft_action_lines` |
@@ -84,7 +84,7 @@ Core → Body（`emit`）：
 | 事件 | 载荷 | 何时 |
 |---|---|---|
 | `pet:state` | `PetState` | 每次状态机跑过一拍且有变化（也定期同步） |
-| `pet:line` | `{text, action, spoken}` | 开始做一件事的台词、生病 / 康复、没病不用吃药、日程提醒（`action = "nudge"`） |
+| `pet:line` | `{text, action, spoken, level, volume}` | 台词、生病 / 康复、日程提醒（`action = "nudge"`）、自言自语（`level = "self"`，小气泡轻声） |
 | `pet:said` | `Verdict` | 一次服从判定的结果 |
 | `pet:gift` | `{id, name}` | 收到礼物，拆一遍 |
 | `pet:motion` | 移动指令 | 自主走路 / 爬墙 / 侧挂 |

@@ -117,6 +117,10 @@ pub struct Line {
     pub action: String,
     /// 语音要不要念。Body 还会再看一次总开关，这里只是把「台词类」标出来
     pub spoken: bool,
+    /// 分量：`talk` 对你说（正常气泡、正常音量）；`self` 自言自语（小气泡、轻声、早收）
+    pub level: String,
+    /// 音量 0–1，自言自语减半
+    pub volume: f32,
 }
 
 /// 上一句什么时候说的。跨线程：心跳线程和主线程都会来
@@ -155,7 +159,7 @@ fn pick_fixed(settings: &ChatSettings, cat: &Catalog, a: &ActionRef) -> Option<S
 
 fn emit(app: &AppHandle, a: &ActionRef, text: String, spoken: bool) {
     log::info!("{}：{}", a.name, text);
-    let _ = app.emit("pet:line", Line { text, action: a.id.clone(), spoken });
+    let _ = app.emit("pet:line", Line { text, action: a.id.clone(), spoken, level: "talk".into(), volume: 1.0 });
 }
 
 /// 不挂在哪个动作上的一句话（生病了、没病不用吃药）。走台词总开关，不受间隔限制——
@@ -166,7 +170,7 @@ pub fn say(app: &AppHandle, tag: &str, text: &str) -> bool {
         return false;
     }
     log::info!("{tag}：{text}");
-    let _ = app.emit("pet:line", Line { text: text.into(), action: tag.into(), spoken: true });
+    let _ = app.emit("pet:line", Line { text: text.into(), action: tag.into(), spoken: true, level: "talk".into(), volume: 1.0 });
     true
 }
 
@@ -176,7 +180,7 @@ const IN_CHARACTER_TIMEOUT: Duration = Duration::from_secs(25);
 /// 把一句「事实」交给模型，用她的口吻说出来（日程提醒用）。事实里的时间、数字不能变——
 /// 改写完会核对原句里每个 `HH:MM` 都还在，不在就退回原句。模型不在 / 超时 / 写砸了也退回原句。
 /// 返回 false = 台词总开关关着，一个字都不会说
-pub fn say_in_character(app: &AppHandle, tag: &str, facts: &str) -> bool {
+pub fn say_in_character(app: &AppHandle, tag: &str, facts: &str, level: &str, volume: f32) -> bool {
     let Ok(settings) = chat::current_settings(app) else { return false };
     if !settings.lines.enabled {
         return false;
@@ -185,6 +189,7 @@ pub fn say_in_character(app: &AppHandle, tag: &str, facts: &str) -> bool {
     let app = app.clone();
     let tag = tag.to_string();
     let facts = facts.to_string();
+    let level = level.to_string();
     tauri::async_runtime::spawn(async move {
         let styled = tokio::time::timeout(IN_CHARACTER_TIMEOUT, rephrase(&settings, &facts, mood)).await;
         let text = match styled {
@@ -199,9 +204,51 @@ pub fn say_in_character(app: &AppHandle, tag: &str, facts: &str) -> bool {
             }
         };
         log::info!("{tag}：{text}");
-        let _ = app.emit("pet:line", Line { text, action: tag, spoken: true });
+        let _ = app.emit("pet:line", Line { text, action: tag, spoken: true, level, volume });
     });
     true
+}
+
+/// 自言自语：让模型按此刻的处境嘀咕一句，不对你说、不提问、不提醒。
+/// 写不出像样的就一个字不说——自言自语宁缺毋滥。`done` 拿到最终的那句（记账用）
+pub fn mumble(app: &AppHandle, avoid: Vec<String>, volume: f32, done: impl FnOnce(String) + Send + 'static) {
+    let Ok(settings) = chat::current_settings(app) else { return };
+    if !settings.lines.enabled {
+        return;
+    }
+    let state = crate::pet_snapshot(app);
+    let situation = chat::describe_state(&state);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let p = &settings.persona;
+        let hour = chrono::Local::now().format("%H:%M").to_string();
+        let avoid_text = if avoid.is_empty() { String::new() } else { format!("\n最近已经说过（别重复意思）：{}", avoid.join(" / ")) };
+        let system = format!(
+            "你是{}。性格：{}。说话方式：{}。\n现在 {}，{}{}\n\
+             自言自语一句（不超过 20 个字）：说说你此刻在做的事、感觉或一个小念头。\
+             这句话不是对用户说的——不要用「你」、不要提问、不要提醒、不要打招呼。\
+             只输出这一句话本身：不要引号、不要解释、不要动作描写。",
+            p.name, p.personality, p.speaking_style, hour, situation, avoid_text
+        );
+        let raw = match tokio::time::timeout(IN_CHARACTER_TIMEOUT, chat::complete(&settings, &system, "嘀咕一句。", 40, 0.95)).await {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
+                log::info!("这次不嘀咕了（{e}）");
+                return;
+            }
+            Err(_) => {
+                log::info!("模型太慢，这次不嘀咕了");
+                return;
+            }
+        };
+        let Some(text) = pick_mumble_line(&raw, &p.name, &avoid) else {
+            log::info!("嘀咕的不像自言自语，不说：{raw:?}");
+            return;
+        };
+        log::info!("自言自语：{text}");
+        let _ = app.emit("pet:line", Line { text: text.clone(), action: "mumble".into(), spoken: true, level: "self".into(), volume });
+        done(text);
+    });
 }
 
 /// 用她的口吻复述一句事实。只给人设和事实，不给别的——4B/9B 模型给多了就开始发挥
@@ -224,6 +271,38 @@ async fn rephrase(settings: &ChatSettings, facts: &str, mood: Mood) -> Result<St
         return Err(format!("把时间 {missing} 弄丢了：{text:?}"));
     }
     Ok(text)
+}
+
+/// 自言自语最长多少字。再长就不是嘀咕了
+const MUMBLE_MAX_CHARS: usize = 32;
+
+/// 模型嘀咕的原文里挑一行像样的：模型爱先「嗯？」一声再说正文，逐行看，
+/// 跳过带「你」（那是在对用户说）、带问号、太长、重复的
+fn pick_mumble_line(raw: &str, name: &str, avoid: &[String]) -> Option<String> {
+    let ok = |t: &str| {
+        let n = t.chars().count();
+        n >= 2 && n <= MUMBLE_MAX_CHARS && !t.contains('你') && !t.contains('?') && !t.contains('？') && !avoid.iter().any(|a| a == t)
+    };
+    raw.lines().map(|l| tidy(l, name)).find_map(|t| {
+        if ok(&t) {
+            return Some(t);
+        }
+        // 模型爱多写：整行太长就只要第一句（9B 不太听「不超过 20 字」）
+        let first = first_sentence(&t);
+        (first.chars().count() < t.chars().count() && ok(&first)).then_some(first)
+    })
+}
+
+/// 到第一个句末标点为止（含标点）
+fn first_sentence(t: &str) -> String {
+    let mut out = String::new();
+    for c in t.chars() {
+        out.push(c);
+        if matches!(c, '。' | '！' | '!' | '~' | '～' | '…') {
+            break;
+        }
+    }
+    out
 }
 
 /// 句子里所有 `HH:MM`。改写后核对用
@@ -386,6 +465,20 @@ fn tidy(line: &str, name: &str) -> String {
 mod tests {
     use super::*;
     use crate::core::state_machine::FoodRef;
+
+    #[test]
+    fn 嘀咕只挑像样的那一行() {
+        let raw = "嗯？\n\n墨香混着宣纸味，写出的字歪歪扭扭的。\n你觉得呢？";
+        assert_eq!(pick_mumble_line(raw, "萝莉斯", &[]).as_deref(), Some("墨香混着宣纸味，写出的字歪歪扭扭的。"));
+        assert_eq!(pick_mumble_line("你在干嘛呀？", "萝莉斯", &[]), None, "对用户说的不算自言自语");
+        assert_eq!(
+            pick_mumble_line("正在啃书，脑袋里像装了小马达一样转个不停呢！感觉这知识像星星一样多又亮，嘿嘿~", "萝莉斯", &[]).as_deref(),
+            Some("正在啃书，脑袋里像装了小马达一样转个不停呢！"),
+            "太长就只要第一句"
+        );
+        let said = vec!["写字好难。".to_string()];
+        assert_eq!(pick_mumble_line("写字好难。", "萝莉斯", &said), None, "说过的不说");
+    }
 
     #[test]
     fn 改写提醒时时间一个都不能丢() {

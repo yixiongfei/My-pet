@@ -45,6 +45,12 @@ export interface NudgeSettings {
   leadMin: number
   /** 多久没动键鼠算不在（秒） */
   idleMaxSec: number
+  /** 一天主动搭话几次（自言自语不算） */
+  dailyBudget: number
+  /** 让模型隔一阵子嘀咕一句 */
+  selfTalk: boolean
+  /** 自言自语 / 关心你歇一下的音量 0–1 */
+  quietVolume: number
 }
 export interface ActionInfo { id: string; name: string; defaultLines: string[] }
 /** 与 core/scheduler.rs 的 Timer 一致；focus 非空 = 专注段，头顶有倒计时 */
@@ -74,7 +80,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
 }
 export const DEFAULT_LINE_SETTINGS: LineSettings = { enabled: true, mode: 'fixed', minGapSec: 45, actions: {} }
 /** 与 nudge.rs 的 NudgeSettings::default 成对改 */
-export const DEFAULT_NUDGE_SETTINGS: NudgeSettings = { enabled: true, leadMin: 15, idleMaxSec: 300 }
+export const DEFAULT_NUDGE_SETTINGS: NudgeSettings = { enabled: true, leadMin: 15, idleMaxSec: 300, dailyBudget: 6, selfTalk: true, quietVolume: 0.5 }
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   model: 'qwen3.5:9b', endpoint: 'http://127.0.0.1:11434', temperature: 0.75,

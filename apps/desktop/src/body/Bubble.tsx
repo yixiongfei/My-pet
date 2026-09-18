@@ -14,6 +14,8 @@ export interface BubbleProps {
   streaming: boolean
   /** 头顶区的高度（px）：气泡不能比它高，否则名字会被顶出窗口 */
   maxHeight?: number
+  /** `self` = 自言自语：小一号、淡一点、不带名字——这话不是对你说的 */
+  tone?: 'talk' | 'self'
 }
 
 /**
@@ -21,7 +23,8 @@ export interface BubbleProps {
  * 这块区域对鼠标是穿透的，所以气泡没有任何按钮：超出的部分打省略号，
  * 完整内容在对话窗口里。
  */
-export function Bubble({ name, text, streaming, maxHeight }: BubbleProps) {
+export function Bubble({ name, text, streaming, maxHeight, tone = 'talk' }: BubbleProps) {
+  const quiet = tone === 'self'
   const long = text.length > STREAM_TAIL_CHARS
   const shown = streaming && long ? '…' + text.slice(-STREAM_TAIL_CHARS) : text
   const fit = maxHeight ? Math.floor((maxHeight - CHROME_PX) / LINE_PX) : MAX_LINES
@@ -30,14 +33,15 @@ export function Bubble({ name, text, streaming, maxHeight }: BubbleProps) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
       <div
         style={{
-          maxWidth: '94%', minWidth: 120, boxSizing: 'border-box',
-          padding: '9px 13px 10px', borderRadius: 16,
-          background: 'rgba(28,28,32,.9)', color: '#f4f4f5',
-          font: `${long ? 13 : 14}px/1.55 system-ui, "Microsoft YaHei", sans-serif`,
+          maxWidth: quiet ? '80%' : '94%', minWidth: quiet ? 80 : 120, boxSizing: 'border-box',
+          padding: quiet ? '6px 11px 7px' : '9px 13px 10px', borderRadius: 16,
+          background: quiet ? 'rgba(28,28,32,.72)' : 'rgba(28,28,32,.9)', color: quiet ? '#d6d6da' : '#f4f4f5',
+          font: `${quiet ? 12 : long ? 13 : 14}px/1.55 system-ui, "Microsoft YaHei", sans-serif`,
+          fontStyle: quiet ? 'italic' : 'normal',
           boxShadow: '0 6px 24px rgba(0,0,0,.35)', backdropFilter: 'blur(6px)',
         }}
       >
-        <div style={{ fontWeight: 700, color: '#ffd9a0', fontSize: 12, marginBottom: 2, letterSpacing: '.2px' }}>{name}</div>
+        {!quiet && <div style={{ fontWeight: 700, color: '#ffd9a0', fontSize: 12, marginBottom: 2, letterSpacing: '.2px' }}>{name}</div>}
         <div
           style={{
             display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: lines,
@@ -52,7 +56,7 @@ export function Bubble({ name, text, streaming, maxHeight }: BubbleProps) {
       <div
         style={{
           width: 14, height: 14, marginTop: -7, transform: 'rotate(45deg)',
-          background: 'rgba(28,28,32,.9)', borderRadius: 2,
+          background: quiet ? 'rgba(28,28,32,.72)' : 'rgba(28,28,32,.9)', borderRadius: 2,
         }}
       />
     </div>

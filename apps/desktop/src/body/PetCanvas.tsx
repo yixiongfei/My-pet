@@ -17,6 +17,10 @@ import { toLogical } from './touch'
 /** 话在念的时候气泡不收；念完再留一会儿。合成加播放最长也就这么久，兜底 */
 const SPEAKING_HOLD_MS = 45_000
 const AFTER_SPEECH_MS = 2_000
+/** 她主动搭话你没回：三十秒就收，不追着问 */
+const NUDGE_HOLD_MS = 30_000
+/** 自言自语没出声时最多留这么久——余光扫到就行 */
+const SELF_TALK_HOLD_MS = 6_000
 /** 立绘上方留给气泡 / 倒计时的高度，按立绘边长算。**必须和 src-tauri lib.rs 的 HEAD_ROOM 一致**（窗口高 = 宽 × 1.6） */
 const HEAD_ROOM = 0.6
 
@@ -40,6 +44,7 @@ export function PetCanvas() {
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('VPet')
   const [bubble, setBubble] = useState<string | null>(null)
+  const [bubbleTone, setBubbleTone] = useState<'talk' | 'self'>('talk')
   const [streaming, setStreaming] = useState(false)
   /** 正在流式收的那条回复：文本 + 已经送去念到哪了 */
   const streamRef = useRef<{ id: string; text: string; spoken: number } | null>(null)
@@ -52,16 +57,22 @@ export function PetCanvas() {
     hideTimer.current = window.setTimeout(() => setBubble(null), ms)
   }, [])
 
-  /** 桌面上的短句：气泡 + （开了语音就）念出来。念的话气泡等念完再收 */
-  const announce = useCallback((text: string, speak: 'line' | 'none' = 'line') => {
+  /**
+   * 桌面上的短句：气泡 + （开了语音就）念出来。念的话气泡等念完再收。
+   * `level` 是分量：自言自语小气泡、轻声、早收；搭话（`nudge`）没回应三十秒就收
+   */
+  const announce = useCallback((text: string, speak: 'line' | 'none' = 'line', opts: { level?: 'talk' | 'self'; volume?: number; nudge?: boolean } = {}) => {
     streamRef.current = null
     setStreaming(false)
+    const level = opts.level ?? 'talk'
+    setBubbleTone(level)
     setBubble(text)
     bubbleMeta.current = { at: Date.now(), text }
     const speech = speechRef.current
     const spoken = speak === 'line' && !!speech?.allows('line')
-    scheduleHide(spoken ? SPEAKING_HOLD_MS : hideDelayMs(text))
-    if (spoken) speech?.say(text, 'line')
+    const hold = level === 'self' ? Math.min(SELF_TALK_HOLD_MS, hideDelayMs(text)) : opts.nudge ? Math.min(NUDGE_HOLD_MS, hideDelayMs(text)) : hideDelayMs(text)
+    scheduleHide(spoken ? SPEAKING_HOLD_MS : hold)
+    if (spoken) speech?.say(text, 'line', { volume: opts.volume })
   }, [scheduleHide])
 
   /** 语音开关变了（设置页保存）就同步给说话队列 */
@@ -104,6 +115,7 @@ export function PetCanvas() {
       // Core 收尾时会把清理过的最终文本带回来（去掉模型拖出的旁白），以它为准
       const text = (event.text ?? current.text).trim()
       if (!text) { setBubble(null); speech?.interrupt(); return }
+      setBubbleTone('talk')
       setBubble(text)
       bubbleMeta.current = { at: Date.now(), text }
       const spoken = !!speech?.allows('chat')
@@ -128,6 +140,7 @@ export function PetCanvas() {
     }
     streamRef.current = next
     setStreaming(true)
+    setBubbleTone('talk')
     setBubble(next.text)
   }, [scheduleHide])
 
@@ -201,8 +214,14 @@ export function PetCanvas() {
         }))
         // 动作台词：开始做一件事时随口一句（settings 里可以关、可以改）
         stops.push(subscribe('pet:line', (payload) => {
-          const line = payload as { text?: string; spoken?: boolean } | null
-          if (line?.text) announce(line.text, line.spoken === false ? 'none' : 'line')
+          const line = payload as { text?: string; spoken?: boolean; level?: string; volume?: number; action?: string } | null
+          if (line?.text) {
+            announce(line.text, line.spoken === false ? 'none' : 'line', {
+              level: line.level === 'self' ? 'self' : 'talk',
+              volume: line.volume,
+              nudge: line.action === 'nudge',
+            })
+          }
         }))
         stops.push(subscribe('timer:fired', (payload) => {
           const t = payload as FocusTimer | null
@@ -280,7 +299,7 @@ export function PetCanvas() {
         )}
         {bubble && (
           <div style={{ position: 'absolute', left: 6, right: 6, bottom: 2 }}>
-            <Bubble name={name} text={bubble} streaming={streaming} maxHeight={window.innerWidth * HEAD_ROOM - 6} />
+            <Bubble name={name} text={bubble} streaming={streaming} tone={bubbleTone} maxHeight={window.innerWidth * HEAD_ROOM - 6} />
           </div>
         )}
       </div>
