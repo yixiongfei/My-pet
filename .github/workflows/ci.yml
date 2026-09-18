@@ -13,9 +13,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+      # pnpm 版本只在 package.json 的 packageManager 里写一处；这里再写一个 version 会被 action 判成冲突直接退出
       - uses: pnpm/action-setup@v4
-        with:
-          version: 12
       - uses: actions/setup-node@v4
         with:
           node-version: 22
