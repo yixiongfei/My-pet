@@ -84,10 +84,17 @@ export function PetCanvas() {
    * 前一句在念的时候后一句已经在合成了，不用等整段回复结束
    */
   const onChatStream = useCallback((payload: unknown) => {
-    const event = payload as { requestId?: string; delta?: string; done?: boolean; text?: string } | null
+    const event = payload as { requestId?: string; delta?: string; done?: boolean; text?: string; reset?: boolean } | null
     if (!event?.requestId) return
     const speech = speechRef.current
-    const current = streamRef.current
+    let current = streamRef.current
+    if (event.reset && current?.id === event.requestId) {
+      // 模型重来了一次：已经念出去的作废，气泡清空
+      speech?.interrupt()
+      current = null
+      streamRef.current = null
+      setBubble(null)
+    }
     if (event.done) {
       if (current?.id !== event.requestId) return
       streamRef.current = null
@@ -106,9 +113,9 @@ export function PetCanvas() {
       return
     }
     window.clearTimeout(hideTimer.current)
-    const fresh = current?.id !== event.requestId
+    const fresh = !current || current.id !== event.requestId
     if (fresh) speech?.interrupt() // 新的回复来了，旧的别念了
-    const next = fresh
+    const next = !current || fresh
       ? { id: event.requestId, text: event.delta ?? '', spoken: 0 }
       : { id: event.requestId, text: current.text + (event.delta ?? ''), spoken: current.spoken }
     const { ready } = Speech.splitSentences(next.text.slice(next.spoken))

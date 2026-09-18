@@ -27,6 +27,9 @@ type Phase = 'start' | 'loop' | 'end' | 'step'
 
 /** 解码后的帧缓存上限。ImageBitmap 按 RGBA8 估算：size×size×4 字节/帧 */
 const MAX_CACHED_BYTES = 192 * 1024 * 1024
+/** 目标动画不存在时，隔多久再把 onIdle 交还给外面的状态机；连续缺这么多次就放弃 */
+const MISSING_RETRY_MS = 400
+const MISSING_GIVE_UP = 8
 
 /**
  * Canvas 2D 帧动画播放器。
@@ -58,6 +61,8 @@ export class AnimationPlayer {
   private stopping = false
   /** 这次请求只播一轮；与用户在 start 中途调用 stop() 分开。 */
   private once = false
+  /** 连续几次「没有动画」。找到一次就清零 */
+  private missingStreak = 0
   private raf = 0
   private generation = 0
   /** 当前画面属于哪次请求；旧 clip 结束时不能拿新的 target / callback 继续播放。 */
@@ -119,10 +124,13 @@ export class AnimationPlayer {
     const first = start.length ? { phase: 'start' as Phase, clip: pick(start) } : loop.length ? { phase: 'loop' as Phase, clip: pick(loop) } : single.length ? { phase: 'loop' as Phase, clip: pick(single) } : null
     if (!first) {
       console.warn(`[AnimationPlayer] 没有动画：${this.target.type}/${this.target.name}/${this.target.mood}`)
-      const idle = this.onIdle
-      queueMicrotask(() => { if (gen === this.generation) idle?.() })
+      // 不能用微任务立刻回调：外面的状态机会再 play 同一个不存在的目标，
+      // 微任务之间不让渲染线程喘气，整个页面就卡死了（收礼时 default/gift 就是这样）。
+      // 延迟一点再叫，并且连着叫不到就放弃
+      this.deferIdle(gen)
       return
     }
+    this.missingStreak = 0
     await this.switchTo(first.clip, first.phase, gen)
     // 预热下一段
     void this.preload(loop.length ? loop : single)
@@ -141,12 +149,26 @@ export class AnimationPlayer {
     const clips = this.resolve(animat)
     if (!clips.length) {
       this.stepDone = null
-      // 非法 / 缺段目标不能同步递归外部 FSM；并且回调执行前再查一次代际。
-      queueMicrotask(() => { if (gen === this.generation) onDone?.() })
+      // 非法 / 缺段目标不能同步递归外部 FSM；也不能用微任务——见 deferIdle
+      this.missingStreak++
+      if (this.missingStreak > MISSING_GIVE_UP) return
+      window.setTimeout(() => { if (gen === this.generation) onDone?.() }, MISSING_RETRY_MS)
       return
     }
+    this.missingStreak = 0
     this.stepDone = onDone ?? null
     await this.switchTo(pick(clips), 'step', gen)
+  }
+
+  /** 缺动画时延迟回调 onIdle；连续缺太多次就不再回调，免得空转 */
+  private deferIdle(gen: number): void {
+    this.missingStreak++
+    if (this.missingStreak > MISSING_GIVE_UP) {
+      console.error('[AnimationPlayer] 连续找不到动画，停止回调 onIdle')
+      return
+    }
+    const idle = this.onIdle
+    window.setTimeout(() => { if (gen === this.generation) idle?.() }, MISSING_RETRY_MS)
   }
 
   /** 请求结束：当前 loop 跑完后进入 end 段，播完触发 onIdle */

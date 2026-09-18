@@ -54,7 +54,8 @@ export interface ChatMessage {
 }
 export interface ModelStatus { connected: boolean; models: string[]; error: string | null }
 export interface DesktopSettings { size: number; alwaysOnTop: boolean }
-export interface StreamEvent { requestId: string; delta: string; done: boolean; text?: string }
+/** reset = 模型没进角色重来了一次，前面流出来的字作废 */
+export interface StreamEvent { requestId: string; delta: string; done: boolean; text?: string; reset?: boolean }
 
 /** 与 tts.rs 的 NEURO_STYLE / VoiceSettings::default 一致 */
 export const NEURO_STYLE = '语气平稳、起伏小，节奏偏快，音调偏高，像轻快的电子少女音 / flat calm intonation, quick pace, slightly high pitch, light synthetic girl voice'

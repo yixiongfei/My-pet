@@ -1460,7 +1460,10 @@ fn end_pet_drag(app: AppHandle, hit: State<'_, Mutex<HitState>>) {
         hit.drag_anchor = None;
         hit.pinned = false;
     }
-    pet_motion::settle_after_drag(&app);
+    // 拖过左右边缘超过阈值就侧挂（原版功能）；其余越界一律弹回来
+    if !pet_motion::settle_after_drag(&app) {
+        pet_motion::clamp_into_screen(&app);
+    }
 }
 
 pub fn run() {

@@ -450,6 +450,30 @@ pub fn settle_after_drag(app: &AppHandle) -> bool {
     true
 }
 
+/// 松手时没到侧挂的份上，但身体有一部分出了屏幕：弹回来。上方的气泡区可以在屏幕外，
+/// 身体（下面的正方形）不行——拖出去了找不回来是真的会发生的事
+pub fn clamp_into_screen(app: &AppHandle) -> bool {
+    let Some(win) = app.get_webview_window(PET_WINDOW) else {
+        return false;
+    };
+    let Some(g) = geometry(app, &win) else {
+        return false;
+    };
+    let (x, y) = clamped_position(g);
+    if x == g.x && y == g.y {
+        return false;
+    }
+    log::info!("宠物出了屏幕，弹回来（{},{} → {},{}）", g.x, g.y, x, y);
+    win.set_position(PhysicalPosition::new(x, y)).is_ok()
+}
+
+/// 身体完全落在当前显示器里的最近位置
+fn clamped_position(g: Geometry) -> (i32, i32) {
+    let max_x = (g.monitor_right() - g.width as f64).round() as i32;
+    let x = if max_x >= g.monitor_x { g.x.clamp(g.monitor_x, max_x) } else { g.monitor_x };
+    (x, g.clamped_y())
+}
+
 /// 点击 / 再次拖动侧挂的宠物时，把完整身体拉回当前显示器。
 #[tauri::command]
 pub fn exit_pet_side(app: AppHandle) -> bool {
@@ -791,6 +815,17 @@ mod tests {
             speed_y: 0.0,
             distance: 7,
         }
+    }
+
+    #[test]
+    fn 松手后出屏的身体会弹回屏幕内() {
+        // 屏幕 1920×1080 在 (0,0)，窗口 500 宽 800 高（上面 300 是气泡区）
+        let g = geometry_at(-120, 900, 500, 800);
+        assert_eq!(clamped_position(g), (0, 1080 - 800), "左边和底部都出去了");
+        let g = geometry_at(1700, -400, 500, 800);
+        assert_eq!(clamped_position(g), (1920 - 500, -300), "右边出去；顶部只允许气泡区出屏");
+        let g = geometry_at(700, 200, 500, 800);
+        assert_eq!(clamped_position(g), (700, 200), "本来就在屏幕里的不动");
     }
 
     #[test]

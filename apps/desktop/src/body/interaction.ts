@@ -1,6 +1,7 @@
 import type { GraphType, Manifest, PetProfile, PetState } from '@vpet/shared'
 import type { AnimationPlayer } from './AnimationPlayer'
-import { namesFor, pick } from './manifest'
+import { ANIMATION_POOLS, dwellMs, pickEntry, type PoolEntry } from './animationPool'
+import { namesFor, pick, resolveClips, resolveLayered } from './manifest'
 import { CLIP_FOR, DEFAULT_PET_STATE } from './petState'
 import {
   beginPetDrag,
@@ -60,6 +61,9 @@ export class Interaction {
   private disposed = false
   /** 正在出声（语音在放）。一次性动画播完后 toActivity 会先接上 say 动画 */
   private speaking = false
+  /** 动画池里当前这一段：属于哪个活动、播到什么时候换。摸头 / 说话打断后回来接着播它 */
+  private pooled: { activity: PetState['activity']; entry: PoolEntry; until: number } | null = null
+  private poolTimer = 0
   private side: 'left' | 'right' | null = null
   private sideHovered = false
   /** 每次切换侧挂阶段就递增；异步解码完的旧回调看到代数不一致便作废 */
@@ -179,6 +183,7 @@ export class Interaction {
     this.sideGeneration++
     this.cancelMove()
     window.clearTimeout(this.idleTimer)
+    window.clearTimeout(this.poolTimer)
     window.clearTimeout(this.pressTimer)
     endPetDrag()
     this.o.player.onIdle = null
@@ -269,16 +274,59 @@ export class Interaction {
       this.playSay()
       return
     }
+    // 工作 / 学习 / 玩：从动画池里挑一段，驻留期内被打断了回来还接着播它
+    if (this.playPooled()) return
+    this.pooled = null
+    window.clearTimeout(this.poolTimer)
     const { type, name } = CLIP_FOR[this.state.activity]
-    // Core 指名了具体动作就用它的动画（同是 working，文案≠修屏幕），否则用兜底
+    // Core 指名了具体动作就用它的动画（同是 working，文案≠修屏幕）；这个类型下没有
+    // 这个名字（收礼待机时 default 下没有 gift）就随机挑一个，别把不存在的目标交给播放器
     const graph = this.state.action?.graph ?? name
     void this.o.player.play({
       type,
-      name: this.nameFor(type, graph),
+      name: this.nameFor(type, graph && this.hasClip(type, graph) ? graph : undefined),
       mood: this.state.mood,
       foodId: this.state.action?.food?.id,
     })
     this.scheduleIdleAction()
+  }
+
+  /**
+   * 动画池（行为树的「当前计划」）：同一个 Core 活动下按各自的驻留时长轮换表现动画。
+   * 返回 false = 这个活动不在池里，走普通映射
+   */
+  private playPooled(): boolean {
+    const activity = this.state.activity
+    const pool = ANIMATION_POOLS[activity]
+    if (!pool) return false
+    const now = Date.now()
+    const usable = (e: PoolEntry) => this.hasClip(e.type, e.name)
+    let current = this.pooled
+    if (!current || current.activity !== activity || now >= current.until) {
+      // 刚进这个活动优先用 Core 指名的动画；驻留期到了就换一个不同的
+      const prefer = current?.activity === activity ? undefined : this.state.action?.graph
+      const entry = pickEntry(pool, usable, prefer, current?.entry.name)
+      if (!entry) return false
+      current = { activity, entry, until: now + dwellMs(entry) }
+      this.pooled = current
+    }
+    void this.o.player.play({ type: current.entry.type, name: current.entry.name, mood: this.state.mood })
+    window.clearTimeout(this.poolTimer)
+    this.poolTimer = window.setTimeout(() => {
+      // 驻留期到：只有真的闲着（没在摸、没在说、没被提起）才换；否则等那段交互结束后
+      // toActivity 会看到 until 过了，自然换
+      if (!this.disposed && this.mode === 'idle' && this.state.activity === activity) this.toActivity()
+    }, Math.max(1000, current.until - now))
+    window.clearTimeout(this.idleTimer)
+    return true
+  }
+
+  /** (type, name) 在资源里到底有没有动画（夹心的或普通的任一段） */
+  private hasClip(type: GraphType, name: string): boolean {
+    const m = this.o.manifest
+    const mood = this.state.mood
+    return !!resolveLayered(m, type, name, mood)
+      || (['start', 'loop', 'single', 'end'] as const).some((a) => resolveClips(m, type, name, mood, a).length > 0)
   }
 
   /** 没指定名字时按心情随机挑一个（原版 GraphCore.FindName 的语义） */

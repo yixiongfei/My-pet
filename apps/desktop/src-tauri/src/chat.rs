@@ -104,6 +104,9 @@ struct StreamEvent {
     /// 收尾清理后的最终文本。只在成功结束的那条 done 事件里带，气泡用它替换流式内容
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
+    /// 重来一次：前面流出来的字全部作废（模型没进角色那次）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    reset: bool,
 }
 
 #[derive(Serialize)]
@@ -483,6 +486,9 @@ fn clean_reply(raw: &str, name: &str) -> String {
     for prefix in [reply_prefix(name), format!("{name}:")] {
         if let Some(rest) = text.strip_prefix(prefix.as_str()) { text = rest.trim_start(); }
     }
+    if looks_like_meta(text) {
+        return String::new();
+    }
     let mut kept = String::new();
     for line in text.lines() {
         if looks_like_aside(line.trim()) { break; }
@@ -526,6 +532,19 @@ fn strip_think(raw: &str) -> String {
 fn ends_cleanly(text: &str) -> bool {
     text.trim_end().chars().last().is_some_and(|c| matches!(c,
         '。' | '！' | '？' | '!' | '?' | '…' | '～' | '~' | '.' | '）' | ')' | '」' | '"' | '”' | '嘛' | '呀' | '啦' | '呢' | '吧' | '哦'))
+}
+
+/// 整段回答都是模型在盘算「我该怎么回」，而不是角色在说话：
+/// 「作为用户桌面上的虚拟伙伴萝莉斯，我需要自然地与用户展开对话……」。
+/// 逐行的 `looks_like_aside` 抓不住它——它不是拖在正文后面的旁白，它就是正文。
+/// 判据：开头几十个字里堆了两个以上的分析词
+fn looks_like_meta(text: &str) -> bool {
+    const MARKERS: [&str; 14] = [
+        "我需要", "我应该", "我要以", "用户说", "用户想", "用户此刻", "这说明", "体现", "语气来回应",
+        "作为用户", "作为虚拟", "作为桌面", "在内容上", "回应用户",
+    ];
+    let head: String = text.chars().take(80).collect();
+    MARKERS.iter().filter(|m| head.contains(*m)).count() >= 2
 }
 
 /// 这一行是模型对自己说的话，不是角色说的话？
@@ -610,7 +629,7 @@ impl Drop for RequestGuard {
                 if active.as_ref().is_some_and(|a| a.id == self.id) { *active = None; }
             }
         }
-        let _ = self.app.emit("chat-stream", StreamEvent { request_id: self.id.clone(), delta: String::new(), done: true, text: None });
+        let _ = self.app.emit("chat-stream", StreamEvent { request_id: self.id.clone(), delta: String::new(), done: true, text: None, reset: false });
     }
 }
 
@@ -649,7 +668,7 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
     if let Some(reply) = crate::memory_command(app.clone(), text.clone()) {
         let response = message(format!("{request_id}-assistant"), "assistant", reply, "memory", "complete");
         with_store(&app, |store| store.insert(&response, None))?;
-        let _ = app.emit("chat-stream", StreamEvent { request_id, delta: response.content.clone(), done: false, text: None });
+        let _ = app.emit("chat-stream", StreamEvent { request_id, delta: response.content.clone(), done: false, text: None, reset: false });
         return Ok(response);
     }
     // 「去玩会儿」「休息一下吧」：先进状态机过服从判定，再把结果告诉模型，
@@ -665,9 +684,9 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
     let prompt = wire_messages(&build_prompt(&settings, &memories, &history, &text, &now), &settings.persona.name);
     let client = chat_state(&app)?.client.clone();
     let mut output = String::new();
-    let result = {
+    let mut result = {
         let generation = generate(&client, &settings, &prompt, &mut output, |delta| {
-            let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: delta.into(), done: false, text: None });
+            let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: delta.into(), done: false, text: None, reset: false });
         });
         tokio::select! {
             biased;
@@ -675,6 +694,27 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
             result = generation => Some(result),
         }
     };
+    // 模型偶尔不进角色，整段都在盘算怎么回（「作为虚拟伙伴，我需要……」）。
+    // 直接判失败会让用户看到红字；重来一次，把「直接开口」贴在用户消息后面，一般第二次就好了
+    if matches!(result, Some(Ok(()))) && clean_reply(&output, &settings.persona.name).is_empty() {
+        log::warn!("模型没进角色，重来一次：{:?}", output.chars().take(60).collect::<String>());
+        let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: String::new(), done: false, text: None, reset: true });
+        let mut nudged = prompt.clone();
+        if let Some(user) = nudged.iter_mut().rev().find(|m| m.role == "user") {
+            user.content.push_str("\n\n[旁白：直接用她的口吻开口说话，不要分析、不要计划]");
+        }
+        output.clear();
+        result = {
+            let generation = generate(&client, &settings, &nudged, &mut output, |delta| {
+                let _ = app.emit("chat-stream", StreamEvent { request_id: request_id.clone(), delta: delta.into(), done: false, text: None, reset: false });
+            });
+            tokio::select! {
+                biased;
+                _ = cancelled.changed() => None,
+                result = generation => Some(result),
+            }
+        };
+    }
     let (status, mut error) = match result {
         None => ("cancelled", None),
         Some(Ok(())) => ("complete", None),
@@ -697,7 +737,7 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
             log::warn!("模型没回上使唤（{}），用判定的台词", error.as_deref().unwrap_or(""));
             let response = message(format!("{request_id}-assistant"), "assistant", fallback.clone(), "intent", "complete");
             with_store(&app, |store| store.insert(&response, None))?;
-            let _ = app.emit("chat-stream", StreamEvent { request_id, delta: String::new(), done: true, text: Some(response.content.clone()) });
+            let _ = app.emit("chat-stream", StreamEvent { request_id, delta: String::new(), done: true, text: Some(response.content.clone()), reset: false });
             return Ok(response);
         }
     }
@@ -709,7 +749,7 @@ pub async fn send_chat_message(app: AppHandle, text: String, request_id: String)
     let response = message(format!("{request_id}-assistant"), "assistant", output, "model", status);
     with_store(&app, |store| store.insert(&response, Some(&prompt)))?;
     if let Some(error) = error { return Err(error); }
-    let _ = app.emit("chat-stream", StreamEvent { request_id, delta: String::new(), done: true, text: Some(response.content.clone()) });
+    let _ = app.emit("chat-stream", StreamEvent { request_id, delta: String::new(), done: true, text: Some(response.content.clone()), reset: false });
     Ok(response)
 }
 
@@ -1075,6 +1115,8 @@ mod tests {
         assert!(ends_cleanly("我有点困，但既然主人叫我了。"));
         assert!(!ends_cleanly("我有点困，但既然主"));
         assert_eq!(clean_reply("我都准备好啦！\n\n(好奇", "萝莉斯"), "我都准备好啦！");
+        assert_eq!(clean_reply("作为用户桌面上的虚拟伙伴萝莉斯，我需要自然地与用户展开对话。用户说\"今天想和你聊聊\"，这说明他此刻想要进行一次轻松的交谈。", "萝莉斯"), "");
+        assert_eq!(clean_reply("今天想聊什么呀？我需要你先告诉我今天过得怎么样。", "萝莉斯"), "今天想聊什么呀？我需要你先告诉我今天过得怎么样。");
         assert_eq!(clean_reply("（歪头）在呀。", "萝莉斯"), "（歪头）在呀。");
         assert_eq!(clean_reply("（歪头", "萝莉斯"), "（歪头");
         assert_eq!(clean_reply("  \n", "萝莉斯"), "");

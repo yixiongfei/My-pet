@@ -36,7 +36,7 @@ export function Chat() {
     }).catch(e => live && setError(errorText(e)))
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
       const streamOff = await listen<StreamEvent>('chat-stream', ({ payload }) => {
-        if (live && payload.requestId === request.current) setStream(s => s + payload.delta)
+        if (live && payload.requestId === request.current) setStream(s => (payload.reset ? '' : s + payload.delta))
       })
       if (!live) streamOff(); else cleanups.push(streamOff)
       const settingsOff = await listen('chat:settings-changed', () => {
@@ -48,8 +48,22 @@ export function Chat() {
     return () => { live = false; cleanups.forEach(fn => fn()) }
   }, [])
 
+  /** 第一次拿到历史时直接跳到最新一条；之后只有本来就在底部时才跟着滚 */
+  const scrolledOnce = useRef(false)
   useEffect(() => {
-    if (nearBottom.current) end.current?.scrollIntoView({ behavior: busy ? 'instant' : 'smooth', block: 'end' })
+    if (!nearBottom.current) return
+    const area = end.current?.parentElement
+    if (!scrolledOnce.current) {
+      if (!messages.length) return
+      scrolledOnce.current = true
+      // 头像等图片还在加载时高度会变，多跳两次
+      const jump = () => { if (area) area.scrollTop = area.scrollHeight }
+      jump()
+      requestAnimationFrame(jump)
+      window.setTimeout(jump, 300)
+      return
+    }
+    end.current?.scrollIntoView({ behavior: busy ? 'instant' : 'smooth', block: 'end' })
   }, [messages, stream, busy])
 
   const openSettings = async () => {

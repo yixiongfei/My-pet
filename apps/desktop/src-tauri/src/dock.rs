@@ -107,9 +107,20 @@ pub fn poll(app: &AppHandle, button_held: bool) {
         d.collapsed = false;
         d.outside_since = None;
         d.placed_x = Some(pos.x);
-        if side.is_some() {
+        if let Some(side) = side {
             d.last_y = Some(pos.y);
-            d.target_x = Some(expanded_x(side.unwrap(), mx, mw, w));
+            d.target_x = Some(expanded_x(side, mx, mw, w));
+        } else {
+            // 没贴边、但拖出屏幕了：松手弹回来。贴边的那种露一条边是我们自己收的，不算出屏
+            let (my, mh) = (mon.position().y, mon.size().height as i32);
+            let x = pos.x.clamp(mx, (mx + mw - w).max(mx));
+            let y = pos.y.clamp(my, (my + mh - h).max(my));
+            if (x, y) != (pos.x, pos.y) {
+                log::info!("对话窗口出了屏幕，弹回来");
+                let _ = win.set_position(PhysicalPosition::new(x, y));
+                d.placed_x = Some(x);
+                d.seen = Some((x, y));
+            }
         }
         return;
     }

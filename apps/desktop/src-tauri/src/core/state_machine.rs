@@ -255,6 +255,13 @@ pub(crate) const BROKE: f32 = 80.0;
 /// 只有这三类听用户的「多做点 / 少做点」。
 /// 吃喝睡不在里面——那是生理，用户关不掉，关掉就等于让她饿死
 pub(crate) const SUPPRESSIBLE: [&str; 3] = ["work", "study", "play"];
+/// 因为前置条件掉了（体力跌破门槛）而放弃的动作，先冷却这么久。不冷却的话
+/// 歇几十秒体力回到门槛就又去干，一分钟后又跌下来，看起来像抽搐
+const REQUIREMENT_COOLDOWN: f32 = 15.0;
+/// 自己挑活干时，体力得比门槛高出这么多才**开始**（做起来之后掉到门槛才停）。
+/// 开始线和放弃线分开，和心情那处迟滞是同一个道理——否则歇到刚够门槛就去，
+/// 一分钟后又不够，再歇、再去
+const START_MARGIN: f32 = 8.0;
 
 /// 缓过这口气才算歇完
 const RECOVERED_FEELING: f32 = 35.0;
@@ -517,6 +524,12 @@ fn tick(cat: &Catalog, shelf: &FoodShelf, n: &mut Pet, minutes: f32, hour: f32) 
     // 4. 过场动画不许打断；其余情况没事做或该换事做时重新决策
     let busy = n.state.activity.is_transient() && !done;
     if !busy && (n.state.action.is_none() || should_switch(cat, n, hour)) {
+        // 是前置条件掉了才走的话，让这条活冷却一会儿，别在门槛上来回抽
+        if let Some(cur) = n.state.action.as_ref().and_then(|a| cat.get(&a.id)) {
+            if !meets(cur, &n.state) && cur.cooldown > 0.0 {
+                n.cooldowns.insert(cur.id.clone(), REQUIREMENT_COOLDOWN.max(cur.cooldown));
+            }
+        }
         // 你刚让她做的事排在番茄钟前面：番茄钟也是你开的，而这句话是你刚说的
         let hold = n
             .directive
@@ -612,7 +625,12 @@ pub fn decide_with_pin<'a>(
     hold: Option<(&str, &'static str)>,
     biases: &Biases,
 ) -> (&'a ActionDef, &'static str) {
-    let ok = |a: &ActionDef| meets(a, s) && !cd.contains_key(&a.id);
+    // 正事和玩要「缓过来」才开始：门槛之上再留一段余量。吃喝睡不加——那是需要，不是选择
+    let ok = |a: &ActionDef| {
+        meets(a, s)
+            && !cd.contains_key(&a.id)
+            && (!SUPPRESSIBLE.iter().any(|t| a.has_tag(t)) || s.strength >= a.requires.min_strength + START_MARGIN)
+    };
     // 急需时连冷却都不管——真饿了不会因为「刚吃过」就饿着
     let urgent = |a: &ActionDef| meets(a, s);
 
@@ -950,6 +968,27 @@ mod tests {
         let c = cat();
         let p = run(&c, Pet::default(), 5, 23.5);
         assert_eq!(p.state.activity, Activity::Sleeping, "凌晨该睡了");
+    }
+
+    /* ---------- 门槛上不抽搐（换花样是 Body 的事：动画池，见 05 §8） ---------- */
+
+    #[test]
+    fn 体力在门槛上不会来回抽搐() {
+        let c = cat();
+        let mut p = Pet::default();
+        p.state.strength = 20.5; // 文案要 20，刚够
+        p.state.money = 0.0;
+        let mut flips = 0;
+        let mut last = String::new();
+        for i in 0..40 {
+            p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 10.0 + i as f32 / 60.0 });
+            let id = p.state.action.as_ref().unwrap().id.clone();
+            if id != last {
+                flips += 1;
+                last = id;
+            }
+        }
+        assert!(flips <= 4, "四十分钟换了 {flips} 次");
     }
 
     #[test]
