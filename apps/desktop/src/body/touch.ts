@@ -25,6 +25,12 @@ export function pressZone(p: PetProfile, mood: Mood, x: number, y: number): Pres
   return inside(p.touchRaised[mood], x, y) ? 'raise' : null
 }
 
+/** 提起区域左右半区对应两套提起动作；资源只有一套时由播放器自动降级。 */
+export function raiseVariant(p: PetProfile, mood: Mood, x: number): 0 | 1 {
+  const area = p.touchRaised[mood]
+  return x < area.px + area.sw / 2 ? 0 : 1
+}
+
 /** DOM 坐标 → pet.json 的 500×500 参考系（元素被 CSS 缩放也成立） */
 export function toLogical(el: Element, clientX: number, clientY: number): Point {
   const r = el.getBoundingClientRect()

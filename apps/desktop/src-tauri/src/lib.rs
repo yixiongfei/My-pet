@@ -63,6 +63,12 @@ const PET_LOGICAL_SIZE: f64 = 500.0;
 pub(crate) const HEAD_ROOM: f64 = 0.6;
 /// 光标轮询间隔（docs/04 §4）
 const POLL: Duration = Duration::from_millis(16);
+/// 松手时超过这个速度才进入抛出；单位：物理像素 / 秒
+const THROW_MIN_SPEED: f64 = 180.0;
+/// 抛出后的重力加速度；单位：物理像素 / 秒²
+const THROW_GRAVITY: f64 = 1800.0;
+/// 抛出后的水平阻尼，避免宠物无限滑出屏幕
+const THROW_DAMPING: f64 = 2.8;
 
 /// 状态推进的节拍。一秒一次，数值按 1/60 分钟走——比每分钟一跳平滑，
 /// 也让吃喝这种几秒钟的过场能踩准点
@@ -94,6 +100,18 @@ struct HitState {
     ignoring: bool,
     /// Original press offset in the 500px reference coordinate system.
     drag_anchor: Option<(f64, f64)>,
+    drag_last_cursor: Option<(f64, f64, Instant)>,
+    drag_velocity: (f64, f64),
+    thrown: Option<ThrownPet>,
+}
+
+#[derive(Clone, Copy)]
+struct ThrownPet {
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+    last_at: Instant,
 }
 
 impl HitState {
@@ -449,6 +467,10 @@ fn cancel_focus(app: AppHandle) -> bool {
     true
 }
 
+pub(crate) fn cancel_focus_for_chat(app: AppHandle) -> bool {
+    cancel_focus(app)
+}
+
 /* ==================== 主动开口 ==================== */
 
 /// 多久看一次。粒度是分钟，没必要每拍都去开知识库
@@ -765,12 +787,13 @@ fn check_nudges(app: &AppHandle, state: &PetState) {
     // 没有正事要说：隔一阵子让她自己嘀咕一句（模型写；内存紧就算了）
     if nudge::mumble_due(&n.book, &moment, settings.nudges.self_talk) {
         let avoid: Vec<String> = n.book.mumbles.iter().cloned().collect();
+        let variation = n.book.mumble_seq;
         n.book.last_mumble_ms = Some(now); // 先占位，免得模型慢的时候连发
         save_book(app, &n.book);
         drop(n);
         let volume = settings.nudges.quiet_volume;
         let app = app.clone();
-        lines::mumble(&app.clone(), avoid, volume, move |text| {
+        lines::mumble(&app.clone(), avoid, variation, volume, move |text| {
             if let Some(ns) = app.try_state::<Mutex<NudgeState>>() {
                 if let Ok(mut n) = ns.lock() {
                     n.book.note_mumble(&text, now_ms());
@@ -893,16 +916,20 @@ fn kb_agenda() -> Option<kb::Agenda> {
 /// 调试：让她现在就嘀咕一句（不看间隔和内存）。看模型写出来像不像自言自语
 #[tauri::command]
 fn mumble_now(app: AppHandle) {
-    let (avoid, volume) = {
+    let (avoid, variation, volume) = {
         let avoid = app
             .try_state::<Mutex<NudgeState>>()
             .and_then(|ns| ns.lock().ok().map(|n| n.book.mumbles.iter().cloned().collect::<Vec<_>>()))
             .unwrap_or_default();
+        let variation = app
+            .try_state::<Mutex<NudgeState>>()
+            .and_then(|ns| ns.lock().ok().map(|n| n.book.mumble_seq))
+            .unwrap_or(0);
         let volume = chat::current_settings(&app).map(|s| s.nudges.quiet_volume).unwrap_or(nudge::QUIET_VOLUME);
-        (avoid, volume)
+        (avoid, variation, volume)
     };
     let app2 = app.clone();
-    lines::mumble(&app, avoid, volume, move |text| {
+    lines::mumble(&app, avoid, variation, volume, move |text| {
         if let Some(ns) = app2.try_state::<Mutex<NudgeState>>() {
             if let Ok(mut n) = ns.lock() {
                 n.book.note_mumble(&text, now_ms());
@@ -1738,6 +1765,10 @@ fn stop_pomodoro(app: AppHandle) -> Option<u32> {
     Some(done)
 }
 
+pub(crate) fn stop_pomodoro_for_chat(app: AppHandle) -> Option<u32> {
+    stop_pomodoro(app)
+}
+
 #[tauri::command]
 fn get_pomodoro(pomo: State<'_, Mutex<Pomodoro>>) -> Option<PomoTick> {
     pomo.lock().ok().and_then(|p| p.snapshot())
@@ -1803,6 +1834,27 @@ fn cancel_timer(app: AppHandle, id: String) -> bool {
         save_timers(&app, &sc);
     }
     ok
+}
+
+/// 对话里的“停止当前计时”：按用户最可能指向的顺序停止番茄钟、专注段，再停止最近到期的普通计时器。
+pub(crate) fn cancel_current_timing(app: &AppHandle) -> Option<&'static str> {
+    if stop_pomodoro_for_chat(app.clone()).is_some() {
+        return Some("番茄钟");
+    }
+    if cancel_focus_for_chat(app.clone()) {
+        return Some("专注倒计时");
+    }
+    let cancelled = {
+        let sched = app.state::<Mutex<Scheduler>>();
+        let Ok(mut sc) = sched.lock() else { return None };
+        let timer = sc.list().iter().filter(|t| t.focus.is_none()).min_by_key(|t| t.due_at).cloned();
+        let Some(timer) = timer else { return None };
+        if !sc.cancel(&timer.id) { return None; }
+        save_timers(app, &sc);
+        timer
+    };
+    log::info!("取消当前计时器：{}", cancelled.label);
+    Some("计时器")
 }
 
 #[tauri::command]
@@ -2039,19 +2091,51 @@ fn begin_pet_drag(hit: State<'_, Mutex<HitState>>, anchor_x: f64, anchor_y: f64)
     let mut hit = hit.lock().map_err(|_| "无法开始拖动")?;
     hit.pinned = true;
     hit.drag_anchor = Some((anchor_x.clamp(0.0, 500.0), anchor_y.clamp(0.0, 500.0)));
+    hit.drag_last_cursor = None;
+    hit.drag_velocity = (0.0, 0.0);
+    hit.thrown = None;
     Ok(())
 }
 
 #[tauri::command]
 fn end_pet_drag(app: AppHandle, hit: State<'_, Mutex<HitState>>) {
-    if let Ok(mut hit) = hit.lock() {
-        hit.drag_anchor = None;
-        hit.pinned = false;
+    let win = app.get_webview_window(PET_WINDOW);
+    let now = Instant::now();
+    let mut throwing = false;
+    if let Ok(mut state) = hit.lock() {
+        // 普通点击也会经过 pointerup，但不能复用上一次提起留下的速度再次抛出。
+        if state.drag_anchor.is_none() && state.thrown.is_none() {
+            return;
+        }
+        if state.thrown.is_none() {
+            if let (Some(win), Some(vx)) = (
+                win.as_ref(),
+                horizontal_throw_velocity(state.drag_velocity.0),
+            ) {
+                if let Ok(pos) = win.outer_position() {
+                    state.thrown = Some(ThrownPet {
+                        x: pos.x as f64,
+                        y: pos.y as f64,
+                        vx,
+                        vy: 0.0,
+                        last_at: now,
+                    });
+                }
+            }
+        }
+        throwing = state.thrown.is_some();
+        state.drag_anchor = None;
+        state.drag_last_cursor = None;
+        state.pinned = false;
+    }
+    if throwing {
+        return;
     }
     // 拖过左右边缘超过阈值就侧挂（原版功能）；其余越界一律弹回来
     if !pet_motion::settle_after_drag(&app) {
         pet_motion::clamp_into_screen(&app);
     }
+    let _ = app.emit("pet:drag-settled", ());
 }
 
 pub fn run() {
@@ -2359,27 +2443,117 @@ fn spawn_hit_test(app: AppHandle) {
 /// Read the physical cursor once and derive an absolute window position. Relative
 /// moves from the WebView raced with each other and mixed artwork px with DPI px.
 fn advance_pet_drag(app: &AppHandle, win: &WebviewWindow) {
+    // 松手后锚点会清空，但惯性仍需由同一轮询持续推进到落地。
+    let thrown = app
+        .state::<Mutex<HitState>>()
+        .lock()
+        .map(|state| state.drag_anchor.is_none() && state.thrown.is_some())
+        .unwrap_or(false);
+    if thrown {
+        advance_thrown_pet(app, win);
+        return;
+    }
     // 拿锁只为读 / 清锚点，读完立刻放：窗口 getter 要等主线程回话，
     // 而主线程的 set_hit_mask 等命令也要这把锁——抱着锁等主线程就是死锁
+    let mut settle_now = false;
     let anchor = {
         let hit = app.state::<Mutex<HitState>>();
         let Ok(mut state) = hit.lock() else { return };
         let Some(anchor) = state.drag_anchor else { return };
         if !primary_button_held() {
+            let mut throwing = false;
+            if let Ok(pos) = win.outer_position() {
+                if let Some(vx) = horizontal_throw_velocity(state.drag_velocity.0) {
+                    state.thrown = Some(ThrownPet {
+                        x: pos.x as f64,
+                        y: pos.y as f64,
+                        vx,
+                        vy: 0.0,
+                        last_at: Instant::now(),
+                    });
+                    throwing = true;
+                }
+            }
             state.drag_anchor = None;
+            state.drag_last_cursor = None;
             state.pinned = false;
+            settle_now = !throwing;
             None
         } else {
             Some(anchor)
         }
     };
+    if settle_now {
+        if !pet_motion::settle_after_drag(app) {
+            pet_motion::clamp_into_screen(app);
+        }
+        let _ = app.emit("pet:drag-settled", ());
+        let _ = app.emit("pet:drag-ended", ());
+        return;
+    }
     let Some(anchor) = anchor else {
+        advance_thrown_pet(app, win);
         let _ = app.emit("pet:drag-ended", ());
         return;
     };
     let (Ok(cursor), Ok(size)) = (app.cursor_position(), win.inner_size()) else { return };
     let target = drag_position((cursor.x, cursor.y), (size.width, size.height), anchor);
+    if let Ok(mut state) = app.state::<Mutex<HitState>>().lock() {
+        let now = Instant::now();
+        if let Some((last_x, last_y, last_at)) = state.drag_last_cursor {
+            let dt = now.duration_since(last_at).as_secs_f64().clamp(0.001, 0.1);
+            let next = ((target.0 as f64, target.1 as f64), (last_x, last_y));
+            let raw = ((next.0.0 - next.1.0) / dt, (next.0.1 - next.1.1) / dt);
+            state.drag_velocity = (
+                state.drag_velocity.0 * 0.35 + raw.0 * 0.65,
+                state.drag_velocity.1 * 0.35 + raw.1 * 0.65,
+            );
+        }
+        state.drag_last_cursor = Some((target.0 as f64, target.1 as f64, now));
+    }
     let _ = win.set_position(PhysicalPosition::new(target.0, target.1));
+}
+
+fn advance_thrown_pet(app: &AppHandle, win: &WebviewWindow) {
+    let hit = app.state::<Mutex<HitState>>();
+    let Ok(mut state) = hit.lock() else { return };
+    let Some(mut thrown) = state.thrown.take() else { return };
+    drop(state);
+    let now = Instant::now();
+    let dt = now.duration_since(thrown.last_at).as_secs_f64().clamp(0.001, 0.05);
+    thrown.last_at = now;
+    thrown.vy += THROW_GRAVITY * dt;
+    thrown.vx *= (-THROW_DAMPING * dt).exp();
+    thrown.x += thrown.vx * dt;
+    thrown.y += thrown.vy * dt;
+    let Ok(size) = win.outer_size() else { return };
+    let Ok(Some(monitor)) = win.current_monitor() else { return };
+    let min_x = monitor.position().x as f64;
+    let max_x = min_x + monitor.size().width as f64 - size.width as f64;
+    let floor = monitor.position().y as f64 + monitor.size().height as f64 - size.height as f64;
+    if thrown.y >= floor {
+        thrown.y = floor;
+        thrown.vy = 0.0;
+        if thrown.vx.abs() < 25.0 {
+            let _ = win.set_position(PhysicalPosition::new(thrown.x.round() as i32, thrown.y.round() as i32));
+            let _ = pet_motion::settle_after_drag(app);
+            let _ = app.emit("pet:drag-settled", ());
+            return;
+        }
+    }
+    if thrown.x < min_x || thrown.x > max_x {
+        thrown.x = thrown.x.clamp(min_x, max_x);
+        thrown.vx *= -0.35;
+    }
+    let _ = win.set_position(PhysicalPosition::new(thrown.x.round() as i32, thrown.y.round() as i32));
+    if let Ok(mut state) = hit.lock() {
+        state.thrown = Some(thrown);
+    };
+}
+
+/** 释放惯性只继承水平速度；上下拖动本身不能触发抛出。 */
+fn horizontal_throw_velocity(vx: f64) -> Option<f64> {
+    (vx.is_finite() && vx.abs() >= THROW_MIN_SPEED).then_some(vx)
 }
 
 /// 锚点在立绘的 500×500 参考系里；立绘是窗口底部那个正方形（边长 = 窗口宽），
@@ -2476,6 +2650,14 @@ mod desktop_tests {
         assert_eq!(drag_position((-700.0, -500.0), (200, 200), (250.0, 100.0)), (-800, -540));
         // 窗口比立绘高出 HEAD_ROOM：锚点的 y 要加上气泡区的高度
         assert_eq!(drag_position((700.0, 500.0), (500, 800), (250.0, 100.0)), (450, 100));
+    }
+
+    #[test]
+    fn throw_uses_horizontal_speed_only() {
+        assert_eq!(horizontal_throw_velocity(THROW_MIN_SPEED - 1.0), None);
+        assert_eq!(horizontal_throw_velocity(THROW_MIN_SPEED), Some(THROW_MIN_SPEED));
+        assert_eq!(horizontal_throw_velocity(-THROW_MIN_SPEED), Some(-THROW_MIN_SPEED));
+        assert_eq!(horizontal_throw_velocity(f64::NAN), None);
     }
 
     #[test]

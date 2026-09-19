@@ -109,12 +109,20 @@ impl FoodShelf {
     /// 按需求和钱包随机挑一样。买不起就返回 None，调用方自己决定怎么办。
     ///
     /// `graph` 是「吃」还是「喝」，和夹心动画对应。
-    /// 排掉 `Drug`——那是原版用来救存档的药，`太阳系` 一口下去体力 −100。
+    /// 排掉 `Drug` 和原版功能 / 彩蛋条目：它们不是自动进食的正常商品，
+    /// 例如「地球」价格为 0 且会扣体力，混进来会导致她反复吃同一个异常物品。
     /// `seed` 由状态机现有状态推导，既有随机变化，又不破坏 reduce 的纯函数约束。
     pub fn pick(&self, graph: &str, need: Need, budget: f32, seed: u64) -> Option<&FoodItem> {
         let pool: Vec<&FoodItem> = self.items
             .iter()
-            .filter(|f| f.graph == graph && f.kind != "Drug" && f.price <= budget && gain(f, need) > 0.0)
+            .filter(|f| {
+                f.graph == graph
+                    && f.kind != "Drug"
+                    && f.price > 0.0
+                    && f.strength >= 0.0
+                    && f.price <= budget
+                    && gain(f, need) > 0.0
+            })
             .collect();
         if pool.is_empty() { None } else { Some(pool[(seed as usize) % pool.len()]) }
     }
@@ -149,7 +157,7 @@ mod tests {
     #[test]
     fn bundled_gifts_available_before_webview_starts() {
         let shelf = FoodShelf::bundled();
-        assert_eq!(shelf.len(), 123);
+        assert_eq!(shelf.len(), 124);
         assert_eq!(shelf.gifts().len(), 20);
         for seed in 0..20 {
             let gift = shelf.random("gift", seed).unwrap();
@@ -158,6 +166,15 @@ mod tests {
             assert!(gift.src.starts_with("food/") && gift.src.ends_with(".webp"));
             assert!(shelf.get(&gift.id).is_some());
         }
+    }
+
+    #[test]
+    fn 生日蛋糕已登记为可播放的食物() {
+        let shelf = FoodShelf::bundled();
+        let cake = shelf.get("birthday-cake").expect("生日蛋糕必须随 Core 目录加载");
+        assert_eq!(cake.graph, "eat");
+        assert_eq!(cake.kind, "Snack");
+        assert_eq!(cake.price, 0.0);
     }
 
     fn item(id: &str, graph: &str, kind: &str, food: f32, drink: f32, feel: f32, price: f32) -> FoodItem {
@@ -222,6 +239,17 @@ mod tests {
             .map(|seed| s.pick("eat", Need::Hunger, 999.0, seed).unwrap().id.as_str())
             .collect();
         assert!(seen.len() >= 2, "吃东西不该永远只选同一样");
+    }
+
+    #[test]
+    fn 自动进食排除免费且扣体力的功能条目() {
+        let shelf = FoodShelf::bundled();
+        for seed in 0..500u64 {
+            let item = shelf.pick("eat", Need::Hunger, 999.0, seed).unwrap();
+            assert!(item.price > 0.0);
+            assert!(item.strength >= 0.0);
+            assert_ne!(item.name, "地球");
+        }
     }
 
     #[test]

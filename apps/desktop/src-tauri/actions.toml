@@ -44,7 +44,7 @@ graph = "sleep"
 tags = ["rest", "recover", "sleep"]
 duration = 540          # 一觉最多九小时：23 点躺下正好睡到 8 点；晚睡的话到 8 点也会被作息叫起来
 cooldown = 600
-hours = [[23, 8]]       # 夜里该睡了。白天累趴了也会睡——那走的是「生理急需」那条路
+hours = []              # 夜里按体力概率入睡；白天累趴了走「生理急需」那条路
 per_min = { strength = 1.0, hunger = -0.12, thirst = -0.15, feeling = 0.1 }
 lines = ["唔……困了。晚安。", "今天就到这里吧，睡觉啦。", "眼睛快睁不开了……我先睡。"]
 
@@ -113,7 +113,7 @@ per_min = { strength = -0.3, hunger = -0.35, thirst = -0.25, feeling = -0.5 }
 earns = { money = 0.8 }
 finish = 0.1
 requires = { min_strength = 20, min_hunger = 15, min_thirst = 15 }
-lines = ["去写文案啦，别吵我哦。", "开工开工，今天也要赚钱。", "好，去干活了。"]
+lines = ["我去写会儿东西。", "开工啦，先把这段做完。", "今天也要认真赚点钱。"]
 
 [[action]]
 id = "work_bbq"
@@ -128,7 +128,7 @@ per_min = { strength = -0.3, hunger = 0.0, thirst = -0.5, feeling = -0.25 }
 earns = { money = 1.2 }
 finish = 0.15
 requires = { level = 5, min_strength = 20, min_thirst = 20 }
-lines = ["烤串时间！小心别烫着。", "去摆摊烤串啦～"]
+lines = ["开始烤串，香味要出来啦。", "我去忙一会儿烤摊。"]
 
 [[action]]
 id = "work_clean"
@@ -143,7 +143,7 @@ per_min = { strength = -0.3, hunger = -0.5, thirst = -0.5, feeling = -0.875 }
 earns = { money = 1.6 }
 finish = 0.2
 requires = { level = 10, min_strength = 30, min_hunger = 25, min_thirst = 25 }
-lines = ["嗯……先把屏幕清一清。", "这里有点乱，我来收拾。"]
+lines = ["先把屏幕收拾干净。", "这里有点乱，我来整理一下。"]
 
 [[action]]
 id = "work_stream"
@@ -158,7 +158,7 @@ per_min = { strength = -0.3, hunger = -0.5, thirst = -1.0, feeling = -1.25 }
 earns = { money = 2.8 }
 finish = 0.25
 requires = { level = 20, min_strength = 40, min_hunger = 30, min_thirst = 35 }
-lines = ["直播要开始了，大家好呀！", "开播啦，今天也请多关照。"]
+lines = ["要开播啦，声音先调好。", "开始直播，今天也请多关照。"]
 
 [[action]]
 id = "work_fix"
@@ -173,7 +173,7 @@ per_min = { strength = -0.3, hunger = -1.0, thirst = -0.8, feeling = -0.625 }
 earns = { money = 3.2 }
 finish = 0.25
 requires = { level = 30, min_strength = 45, min_hunger = 40, min_thirst = 35 }
-lines = ["屏幕坏了？交给我修。", "修屏幕去了，等我一下。"]
+lines = ["屏幕交给我，很快修好。", "我去修一下屏幕。"]
 
 # ---------- 学习：涨经验，掉心情。等级上去了才能干更赚钱的活 ----------
 # 故意不写 hours：默认作息不会抢走玩耍 / 放松时间；用户主动说开始学习，
@@ -191,7 +191,7 @@ per_min = { strength = -0.3, hunger = -0.2, thirst = -0.2, feeling = -1.0 }
 earns = { exp = 80.0 }
 finish = 0.2
 requires = { min_strength = 25, min_hunger = 20, min_thirst = 20 }
-lines = ["好啦，安静看会儿书。", "这一页……好像还挺有意思。", "再学一点点。"]
+lines = ["安静看会儿书吧。", "这一页，我再认真读一遍。", "再学一点点就好。"]
 
 [[action]]
 id = "study_calligraphy"
@@ -206,7 +206,7 @@ per_min = { strength = -0.2, hunger = -0.1, thirst = -0.1, feeling = -0.5 }
 earns = { exp = 40.0 }
 finish = 0.2
 requires = { level = 8, min_strength = 20 }
-lines = ["练会儿字，静静心。", "笔墨伺候，练字去。"]
+lines = ["写会儿字，静静心。", "我去练一会儿字。"]
 
 [[action]]
 id = "study_research"
@@ -220,7 +220,7 @@ per_min = { strength = -0.3, hunger = -0.25, thirst = -0.35, feeling = -1.25 }
 earns = { exp = 120.0 }
 finish = 0.4
 requires = { level = 15, min_strength = 35, min_hunger = 25, min_thirst = 25 }
-lines = ["这个……得认真想想。", "先别吵，我快想明白了。"]
+lines = ["这个问题，我再想想。", "让我安静捋一捋思路。"]
 
 [[action]]
 id = "study_paint"

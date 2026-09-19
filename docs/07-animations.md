@@ -30,7 +30,7 @@
 | Relax/MI · Relax/MU · BDay | `common/mi` `mu` `bday` | 三成概率 | ✅ |
 | WORK/kiss 飞吻 | `work/kiss` | 体力 ≥ 80、心情 ≥ 80、饱腹 / 口渴 ≥ 70、健康 ≥ 80、好感 ≥ 60 全满足时两成 | ✅ |
 | MOVE（walk / crawl / climb / fall 各方向） | `move/*` | 四成概率按原版 16 条规则走路 / 爬行 / 爬墙 / 坠落 | ✅ |
-| SideHide_Left/Right Main · Rise | `sidehide_*` | 拖过屏幕左右边侧挂；hover 探头 | ✅ |
+| SideHide_Left_Main · SideHide_Left_Rise · SideHide_Right_Main · SideHide_Right_Rise | `sidehide_left_main` / `sidehide_left_rise` / `sidehide_right_main` / `sidehide_right_rise` | 拖过对应屏幕边缘侧挂；Main 播放侧挂循环，hover 切换 Rise 探头，离开后回 Main | ✅ |
 
 ## 3. 交互
 
@@ -38,7 +38,7 @@
 |---|---|---|---|
 | Touch_Head | `touch_head` | 短按头 | ✅ |
 | Touch_Body（tb1 · tb2 · turn · showopai · ill 版） | `touch_body/*` | 短按身体，按心情随机挑 | ✅ |
-| Raise（raised_dynamic 挣扎 · raised_static 静止） | `raised_*` | 长按 / 拖动提起 | ✅ |
+| Raise（左右半区选择两套：`raised_dynamic` 一次挣扎 → `raised_static` 静止） | `raised_*` | 长按 / 拖动提起 | ✅ |
 | Pinch | `common/pinch` | 按在脸上（`pinch` 区域）拖动：A 捏住 → B 循环 → 松手 C | ✅ |
 
 ## 4. 说话与过场
@@ -51,16 +51,22 @@
 | Say/Shy | `say/shy` | 收礼 / 吃药的道谢；对话里有「谢谢 / 喜欢你 / 抱 / 脸红」 | ✅ |
 | Think | `common/think` | 等模型首字 | ✅ |
 | StartUP | `startup/startup` | 程序启动 | ✅ |
-| StartUP/newyear | `startup/newyear` | — | ⬜ 新年启动版，还没按日期切 |
+| StartUP/newyear | `startup/newyear` | 每年 1 月 1 日启动完成后 | ✅ |
 | Shutdown | `shutdown` | 托盘退出，播完再结束进程 | ✅ |
 | LevelUP | `common/levelup` | 升级 | ✅ |
 | Switch up / down | `switch_up` / `switch_down` | 心情升 / 降一档 | ✅ |
 | Switch hunger / thirsty | `switch_hunger` / `switch_thirsty` | 进入吃 / 喝之前 | ✅ |
 
-## 5. 还没接的（3 组）
+## 5. 节日与生日
+
+- 1 月 1 日播放 `startup/newyear` 并说新年祝福。
+- 2 月 14 日优先播放 `WORK/kiss`，说温柔的节日祝福。
+- 6 月 7 日祝福用户生日；8 月 14 日庆祝角色生日；两个生日动作结束后播放 `birthday-cake` 食物夹心动画；12 月 25 日播放 `common/bday` 作为节日庆祝。
+- 每次启动每天最多触发一次；本机日期不在列表中时不插入特殊动作。
+
+## 6. 还没接的（2 组）
 
 - `work/reading`：适合进学习池，等看过内容再定驻留。
 - `work/b4`：两张 single，不知道原版在哪用；先留着。
-- `startup/newyear`：按农历新年切启动动画，等做「节日」时一起。
 
-其余 84 组全部在用。哪天想调概率：`interaction.ts` 顶部的 `RELAX_CHANCE` / `KISS_CHANCE` / `MCDONALD_CHANCE` / `STATE_IDLE_CHANCE` / `MOVE_CHANCE`，池子的驻留在 `animationPool.ts`。
+其余 85 组全部在用。哪天想调概率：`interaction.ts` 顶部的 `RELAX_CHANCE` / `KISS_CHANCE` / `MCDONALD_CHANCE` / `STATE_IDLE_CHANCE` / `MOVE_CHANCE`，池子的驻留在 `animationPool.ts`。

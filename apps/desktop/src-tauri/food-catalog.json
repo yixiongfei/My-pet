@@ -2089,5 +2089,22 @@
     "exp": 220,
     "likability": 2,
     "description": "用芭蕉叶包起来的糯米糍粑，软软糯糯，老少皆宜，就算不是端午节，也经常有人做，是一道亲民的小吃。"
+  },
+  {
+    "id": "birthday-cake",
+    "src": "food/birthday-cake.webp",
+    "name": "生日蛋糕",
+    "category": "foods",
+    "graph": "eat",
+    "type": "Snack",
+    "strength": 60,
+    "strengthFood": 45,
+    "strengthDrink": 0,
+    "feeling": 100,
+    "health": 1,
+    "price": 0,
+    "exp": 100,
+    "likability": 5,
+    "description": "生日当天一起分享的蛋糕，不需要购买。"
   }
 ]

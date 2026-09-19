@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { IS_TAURI } from '../body/ipc'
-import { DEFAULT_CHAT_SETTINGS, errorText, invokeStrict } from './api'
+import { DEFAULT_CHAT_SETTINGS, errorText, filterChatDisplayText, invokeStrict } from './api'
 import type { ChatMessage, ChatSettings, ModelStatus, StreamEvent } from './api'
 import { Icon } from './Icons'
+import { MarkdownContent } from './MarkdownContent'
 
 const time = (at: number) => new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 
@@ -22,6 +23,8 @@ export function Chat() {
   const end = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const nearBottom = useRef(true)
+  const streamBuffer = useRef('')
+  const streamFrame = useRef<number | null>(null)
 
   useEffect(() => {
     if (!IS_TAURI) return
@@ -36,9 +39,20 @@ export function Chat() {
     }).catch(e => live && setError(errorText(e)))
     void import('@tauri-apps/api/event').then(async ({ listen }) => {
       const streamOff = await listen<StreamEvent>('chat-stream', ({ payload }) => {
-        if (live && payload.requestId === request.current) setStream(s => (payload.reset ? '' : s + payload.delta))
+        if (!live || payload.requestId !== request.current) return
+        if (payload.reset) streamBuffer.current = ''
+        streamBuffer.current += payload.delta
+        if (streamFrame.current === null) {
+          streamFrame.current = requestAnimationFrame(() => {
+            streamFrame.current = null
+            if (live) setStream(streamBuffer.current)
+          })
+        }
       })
-      if (!live) streamOff(); else cleanups.push(streamOff)
+      if (!live) streamOff(); else cleanups.push(() => {
+        streamOff()
+        if (streamFrame.current !== null) cancelAnimationFrame(streamFrame.current)
+      })
       const settingsOff = await listen('chat:settings-changed', () => {
         void invokeStrict<ChatSettings>('get_chat_settings').then(s => live && setSettings(s))
         void invokeStrict<ModelStatus>('get_model_status').then(s => live && setStatus(s))
@@ -79,7 +93,7 @@ export function Chat() {
     const requestId = crypto.randomUUID()
     request.current = requestId
     nearBottom.current = true
-    setBusy(true); setStream(''); setError('')
+    setBusy(true); streamBuffer.current = ''; setStream(''); setError('')
     if (override === undefined) setText('')
     setMessages(old => [...old, { id: `pending-${requestId}`, role: 'user', content, createdAt: Date.now(), status: 'complete', rating: null, correctedText: null, source: 'model' }])
     try {
@@ -91,7 +105,7 @@ export function Chat() {
       try { setMessages(await invokeStrict<ChatMessage[]>('list_chat_messages')) }
       catch (e) { setError(errorText(e)) }
       request.current = null
-      setBusy(false); setCancelling(false); setStream('')
+      setBusy(false); setCancelling(false);       streamBuffer.current = ''; setStream('')
       input.current?.focus()
       void invokeStrict<ModelStatus>('get_model_status').then(setStatus).catch(() => {})
     }
@@ -148,7 +162,9 @@ export function Chat() {
           {message.role === 'assistant' && <div className="portrait portrait-message"><img src="/avatar.png" alt="" /></div>}
           <div className="message-content">
             <div className="message-meta"><span>{message.role === 'assistant' ? settings.persona.name : '你'}</span><time dateTime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time></div>
-            <div className="message-bubble">{message.content || (message.status === 'cancelled' ? '这次回答已停止。' : '这次没有生成回答。')}</div>
+            <div className="message-bubble">{message.role === 'assistant'
+              ? <MarkdownContent text={filterChatDisplayText(message.content) || (message.status === 'cancelled' ? '这次回答已停止。' : '这次没有生成回答。')} />
+              : filterChatDisplayText(message.content)}</div>
             {message.status !== 'complete' && <p className="message-state">{message.status === 'cancelled' ? '已停止生成' : '生成未完成'}</p>}
             {message.role === 'user' && <div className="message-resend"><button disabled={busy} title="把这句话再发一次" onClick={() => void send(message.content)}><Icon name="arrow" size={12} />重新发送</button></div>}
             {message.role === 'assistant' && message.status === 'complete' && message.source === 'model' && <div className="message-feedback">
@@ -158,7 +174,7 @@ export function Chat() {
             </div>}
           </div>
         </article>)}
-        {busy && <article className="message message-assistant"><div className="portrait portrait-message"><img src="/avatar.png" alt="" /></div><div className="message-content"><div className="message-meta"><span>{settings.persona.name}</span><span>{cancelling ? '正在停止…' : stream ? '正在说…' : '正在想一想…'}</span></div><div className="message-bubble streaming" role="status">{stream || <span className="thinking-dots"><i /><i /><i /></span>}</div></div></article>}
+        {busy && <article className="message message-assistant"><div className="portrait portrait-message"><img src="/avatar.png" alt="" /></div><div className="message-content"><div className="message-meta"><span>{settings.persona.name}</span><span>{cancelling ? '正在停止…' : stream ? '正在说…' : '正在想一想…'}</span></div><div className="message-bubble streaming" role="status">{filterChatDisplayText(stream) ? <MarkdownContent text={filterChatDisplayText(stream)} /> : <span className="thinking-dots"><i /><i /><i /></span>}</div></div></article>}
       </div>}
       <div ref={end} />
     </section>

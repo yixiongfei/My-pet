@@ -726,7 +726,10 @@ pub enum Command {
     Mute { query: String },
 }
 
-const REMEMBER_PREFIX: [&str; 6] = ["记住：", "记住:", "记住", "记一下", "帮我记住", "记下"];
+const REMEMBER_PREFIX: [&str; 11] = [
+    "记住：", "记住:", "记住", "记一下", "帮我记住", "请记住：", "请记住:",
+    "请记住", "以后记得", "以后请记得", "remember that ",
+];
 const FORGET_PREFIX: [&str; 5] = ["忘记：", "忘记:", "忘记", "忘掉", "别记"];
 const RECALL_PHRASES: [&str; 5] = ["你记得我什么", "你还记得什么", "记得我什么", "你记住了什么", "你记得什么"];
 const PIN_PREFIX: [&str; 4] = ["设为重要", "这条很重要", "把这条设为重要信息", "重要："];
@@ -1160,6 +1163,17 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert_eq!(parse_command("你记得我什么？"), Some(Command::Recall));
+    }
+
+    #[test]
+    fn 认得出更自然的记忆说法() {
+        for text in [
+            "请记住：我喜欢安静的学习环境",
+            "以后记得我晚上不想被打扰",
+            "remember that I prefer quiet study sessions",
+        ] {
+            assert!(matches!(parse_command(text), Some(Command::Remember { .. })), "{text}");
+        }
     }
 
     #[test]

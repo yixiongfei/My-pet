@@ -1064,6 +1064,16 @@ fn handle_intent(app: &AppHandle, i: &Intent) -> (String, Option<String>) {
                 Err(e) => (format!("你想设提醒但没设成（{e}）。"), None),
             }
         }
+        Intent::CancelTiming => match crate::cancel_current_timing(&app) {
+            Some(kind) => (
+                format!("你已经停止了当前的{kind}。不要再继续倒计时。"),
+                Some(format!("好，当前{kind}停掉啦。")),
+            ),
+            None => (
+                "用户想停止当前计时，但现在没有正在运行的番茄钟、专注段或计时器。".into(),
+                Some("现在没有正在运行的计时哦。".into()),
+            ),
+        },
         Intent::Music => match crate::music::play_via_spotify(app) {
             Ok(()) => {
                 crate::set_music(app, true);

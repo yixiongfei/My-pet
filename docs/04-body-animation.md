@@ -78,10 +78,11 @@ Core 定活动，Body 按这棵树挑画面：
 |---|---|
 | 摸头 / 摸身（`vup.json.profile` 的 touchhead / touchbody 区域） | `touch_head` / `touch_body` 三段式一遍，回到当前活动 |
 | 按在脸上拖（`pinch` 区域） | 捏脸 `common/pinch`：A 捏住 → B 循环到松手 → C 放开；窗口不动，算一次摸头 |
-| 按住拖动 | `raised_dynamic` 挣扎三次 → `raised_static`；窗口在 Rust 侧跟随物理光标；松手落地 |
+| 按住拖动 | 只有从当前心情的 `touchraised` 区域起手才会提起；左右半区分别选择两套动作。先播放一次 `raised_dynamic`，随后进入 `raised_static`；窗口在 Rust 侧跟随物理光标。快速松手只继承鼠标水平速度并受重力下落，慢速松手直接归位；Rust 确认落地后 Body 才播放收尾，避免空中提前恢复待机 |
 | 松手出屏 | 不到侧挂份上的一律**弹回**当前显示器（头顶区可以在屏幕外，身体不行） |
-| 拖过左 / 右边 50 逻辑像素 | 侧挂：`sidehide_*_main` A→B；hover 播 `rise`；按下播 main C 并完整回到屏幕 |
-| 真正空闲 | 按原版 16 条 `move` 规则走路 / 爬行 / 爬墙 / 顶部移动 / 坠落；位移在 Core 50 ms 轮询里按规则 Interval 推，每步做边界检查 |
+| 拖过左 / 右边 50 逻辑像素 | 左侧使用 `SideHide_Left_Main`，右侧使用 `SideHide_Right_Main` 播放 A→B；鼠标悬停分别切换 `SideHide_Left_Rise` / `SideHide_Right_Rise` 的 A→B，离开时播放 Rise 的 C 段后回到 Main；按下播 Main C 并完整回到屏幕 |
+| 真正空闲 | 每 8–20 秒触发一次小动作；自主移动概率 35%，其余在伸懒腰 / 喝茶 / 庆祝 / 待机姿态间选择；MI / MU 会循环 8–12 秒后再收尾；蹲下动作按资源标注的 125ms 帧时长平滑起立；移动仍按原版 16 条 `move` 规则走路 / 爬行 / 爬墙 / 顶部移动 / 坠落，位移在 Core 50 ms 轮询里按规则 Interval 推，每步做边界检查 |
+| 特殊日期 | 启动完成后按本机日期每天检查一次：1 月 1 日播放 `startup/newyear`，2 月 14 日播放飞吻，6 月 7 日祝福用户生日，8 月 14 日庆祝角色生日，12 月 25 日播放节日庆祝；生日和节日使用 `bday`，同时通过动作匹配的开心 / 害羞语音说祝福；两个生日庆祝动作结束后会播放登记在食物目录中的 `birthday-cake`，明确拿出生日蛋糕，不占日常空闲动作概率 |
 | 说话（TTS 在放） | 按这句话的类别循环 `say/*`：自言自语 / 动作台词 → `self`；日程提醒、状态差时 → `serious`；开心时的对话 → `shining`；道谢 / 害羞字眼 → `shy`；换句换风格才换动画；一次性动画播完再接；提起时不说话 |
 | 启动 / 托盘退出 | `startup` 一次；退出先播 `shutdown`，完成后才结束进程（8 s 超时兜底） |
 | 等模型首字 | `common/think` A → B 循环；首字、取消或失败时播 C 回当前活动 |
@@ -126,3 +127,4 @@ Core 定活动，Body 按这棵树挑画面：
 
 `assets-src/` 中的 PNG / LPS 与生成的 `public/pet/` 不入库；只提交不含图片的
 `assets-src/pet/vup.json`、`assets-src/food/food.json` 映射与 Schema，让后续动画 / 食物归类优化能正常 review、回滚和发布。
+- 角色对话气泡的打字机显示采用 14ms/字；当显示落后超过 24 字时，以 6ms/次、每次最多 5 字追赶，避免流式回复已经收到但画面显示过慢。该优化只影响气泡呈现，不改变 Core 文本、句子切分或 TTS 顺序。

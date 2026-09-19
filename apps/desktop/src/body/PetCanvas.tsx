@@ -70,7 +70,7 @@ export function PetCanvas() {
   }, [])
   const [streaming, setStreaming] = useState(false)
   /** 正在流式收的那条回复：文本 + 已经送去念到哪了 */
-  const streamRef = useRef<{ id: string; text: string; spoken: number; speech?: SpeechCue } | null>(null)
+  const streamRef = useRef<{ id: string; text: string; spoken: number; speech?: SpeechCue; sayStyle?: string } | null>(null)
   const [hovered, setHovered] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [focus, setFocus] = useState<FocusTimer | null>(null)
@@ -84,7 +84,7 @@ export function PetCanvas() {
    * 桌面上的短句：气泡 + （开了语音就）念出来。念的话气泡等念完再收。
    * `level` 是分量：自言自语小气泡、轻声、早收；搭话（`nudge`）没回应三十秒就收
    */
-  const announce = useCallback((text: string, speak: 'line' | 'none' = 'line', opts: { level?: 'talk' | 'self'; volume?: number; nudge?: boolean; style?: string } = {}) => {
+  const announce = useCallback((text: string, speak: 'line' | 'none' = 'line', opts: { level?: 'talk' | 'self'; volume?: number; nudge?: boolean; style?: string; speech?: SpeechCue } = {}) => {
     streamRef.current = null
     setStreaming(false)
     const level = opts.level ?? 'talk'
@@ -95,7 +95,7 @@ export function PetCanvas() {
     const spoken = speak === 'line' && !!speech?.allows('line')
     const hold = level === 'self' ? Math.min(SELF_TALK_HOLD_MS, hideDelayMs(text)) : opts.nudge ? Math.min(NUDGE_HOLD_MS, hideDelayMs(text)) : hideDelayMs(text)
     scheduleHide(spoken ? SPEAKING_HOLD_MS : hold)
-    if (spoken) speech?.say(text, 'line', { volume: opts.volume, style: opts.style })
+    if (spoken) speech?.say(text, 'line', { volume: opts.volume, style: opts.style, speech: opts.speech })
   }, [scheduleHide])
 
   /** 语音开关变了（设置页保存）就同步给说话队列 */
@@ -146,7 +146,7 @@ export function PetCanvas() {
       // 还没念的尾巴：最终文本和流式文本的开头一致才接着念，否则（旁白被裁掉了）只念还没念过的部分
       const spokenPrefix = current.text.slice(0, current.spoken)
       const rest = text.startsWith(spokenPrefix) ? text.slice(current.spoken) : current.spoken === 0 ? text : ''
-      if (rest.trim()) speech?.say(rest, 'chat', { style: sayStyleForChat(text), speech: event.speech ?? current.speech })
+      if (rest.trim()) speech?.say(rest, 'chat', { style: current.sayStyle, speech: current.speech })
       return
     }
     window.clearTimeout(hideTimer.current)
@@ -154,11 +154,24 @@ export function PetCanvas() {
     if ((event.delta ?? '').length > 0) interactionRef.current?.endThink()
     if (fresh) speech?.interrupt() // 新的回复来了，旧的别念了
     const next = !current || fresh
-      ? { id: event.requestId, text: event.delta ?? '', spoken: 0, speech: event.speech }
-      : { id: event.requestId, text: current.text + (event.delta ?? ''), spoken: current.spoken, speech: event.speech ?? current.speech }
+      ? {
+          id: event.requestId,
+          text: event.delta ?? '',
+          spoken: 0,
+          speech: event.speech,
+          sayStyle: sayStyleForChat(event.delta ?? ''),
+        }
+      : {
+          id: current.id,
+          text: current.text + (event.delta ?? ''),
+          spoken: current.spoken,
+          // 一整段回复锁定第一组语气参数，避免后续句子的协议标记改变听感。
+          speech: current.speech ?? event.speech,
+          sayStyle: current.sayStyle,
+        }
     const { ready } = Speech.splitSentences(next.text.slice(next.spoken))
     for (const sentence of ready) {
-      speech?.say(sentence, 'chat', { style: sayStyleForChat(sentence), speech: next.speech })
+      speech?.say(sentence, 'chat', { style: next.sayStyle, speech: next.speech })
       next.spoken += sentence.length
     }
     streamRef.current = next
@@ -196,6 +209,12 @@ export function PetCanvas() {
           onClick: () => void openChat(),
           onDragChange: setDragging,
           onSideExit: exitPetSide,
+          onAmbientLine: (text, speechCue) => announce(text, 'line', {
+            level: 'self',
+            volume: 0.72,
+            style: speechCue.style,
+            speech: speechCue,
+          }),
         })
         interactionRef.current = interaction
         interaction.start()
@@ -224,6 +243,7 @@ export function PetCanvas() {
         }))
         stops.push(subscribe('chat-stream', onChatStream))
         stops.push(subscribe('pet:drag-ended', () => interaction.onPointerUp(true)))
+        stops.push(subscribe('pet:drag-settled', () => interaction.onDragSettled()))
         stops.push(subscribe('pet:motion', (payload) => interaction.handleMotion(payload)))
         // 歌到高潮：跳舞换成 ohhhh
         stops.push(subscribe('pet:music', (payload) => {
@@ -242,13 +262,14 @@ export function PetCanvas() {
         }))
         // 动作台词：开始做一件事时随口一句（settings 里可以关、可以改）
         stops.push(subscribe('pet:line', (payload) => {
-          const line = payload as { text?: string; spoken?: boolean; level?: string; volume?: number; action?: string } | null
+          const line = payload as { text?: string; spoken?: boolean; level?: string; volume?: number; action?: string; speech?: SpeechCue } | null
           if (line?.text) {
             announce(line.text, line.spoken === false ? 'none' : 'line', {
               level: line.level === 'self' ? 'self' : 'talk',
               volume: line.volume,
               nudge: line.action === 'nudge',
               style: sayStyleForLine(line),
+              speech: line.speech,
             })
           }
         }))

@@ -22,6 +22,8 @@ pub enum Intent {
     Focus { minutes: f32, target: Option<String> },
     /// 单纯的提醒：「十分钟后叫我」
     Timer { minutes: f32, label: String },
+    /// 停止当前番茄钟、专注段或计时器
+    CancelTiming,
     /// 「放首歌」「来点音乐」：打开 Spotify 放歌，她跟着跳
     Music,
 }
@@ -84,6 +86,7 @@ pub fn parse(text: &str) -> Option<Intent> {
         return None; // 长篇大论不会是一句命令
     }
     parse_music(&t)
+        .or_else(|| parse_cancel_timing(&t))
         .or_else(|| parse_focus(&t))
         .or_else(|| parse_timer(&t))
         .or_else(|| parse_bias_zh(&t))
@@ -91,6 +94,17 @@ pub fn parse(text: &str) -> Option<Intent> {
         .or_else(|| parse_do_zh(&t))
         .or_else(|| parse_bias_en(&t))
         .or_else(|| parse_do_en(&t))
+}
+
+fn parse_cancel_timing(t: &str) -> Option<Intent> {
+    let s = strip_punct(t);
+    let cancel = ["取消", "停止", "停掉", "关掉", "cancel", "stop", "abort"]
+        .iter()
+        .any(|k| s.contains(k));
+    let timing = ["番茄钟", "番茄", "专注", "计时", "倒计时", "timer", "pomodoro", "focus"]
+        .iter()
+        .any(|k| s.contains(k));
+    (cancel && (timing || s.contains("当前"))).then_some(Intent::CancelTiming)
 }
 
 /// 「帮我设个番茄钟，学习一个小时吧」「专注 50 分钟」「start a 30 min pomodoro」
@@ -114,7 +128,7 @@ fn parse_focus(t: &str) -> Option<Intent> {
         return None;
     }
     if s.contains("取消") || s.contains("停") || s.contains("cancel") || s.contains("stop") {
-        return None; // 「停掉番茄钟」交给别的地方，这里只管开
+        return None; // 取消由 parse_cancel_timing 处理
     }
     let (minutes, _) = duration_zh(&s);
     let minutes = minutes.or_else(|| duration_en(t).0).unwrap_or(DEFAULT_FOCUS_MIN);
@@ -584,6 +598,14 @@ mod tests {
         assert_eq!(parse("提醒我一下"), None);
         // 「去学习一小时」还是使唤，不是番茄钟
         assert_eq!(parse("去学习一个小时"), Some(Intent::Do { target: "study".into(), minutes: Some(60.0) }));
+    }
+
+    #[test]
+    fn 取消番茄钟和当前计时() {
+        for text in ["取消番茄钟", "停止专注", "停掉当前计时", "cancel pomodoro", "stop the current timer"] {
+            assert_eq!(parse(text), Some(Intent::CancelTiming), "没认出取消命令：{text}");
+        }
+        assert_eq!(parse("怎么取消番茄钟"), Some(Intent::CancelTiming));
     }
 
     #[test]

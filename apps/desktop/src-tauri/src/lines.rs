@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::chat::{self, ChatSettings};
 use crate::core::actions::Catalog;
 use crate::core::state_machine::{ActionRef, Mood};
+use crate::tts::{SpeechCue, SpeechEmotion, SpeechStyle};
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -43,7 +44,7 @@ pub struct LineSettings {
 
 impl Default for LineSettings {
     fn default() -> Self {
-        Self { enabled: true, mode: LineMode::Fixed, min_gap_sec: 45, actions: HashMap::new() }
+        Self { enabled: true, mode: LineMode::Fixed, min_gap_sec: 25, actions: HashMap::new() }
     }
 }
 
@@ -121,6 +122,8 @@ pub struct Line {
     pub level: String,
     /// 音量 0–1，自言自语减半
     pub volume: f32,
+    /// 按动作确定语气，避免前端只靠台词文字猜情绪。
+    pub speech: Option<SpeechCue>,
 }
 
 /// 上一句什么时候说的。跨线程：心跳线程和主线程都会来
@@ -159,7 +162,35 @@ fn pick_fixed(settings: &ChatSettings, cat: &Catalog, a: &ActionRef) -> Option<S
 
 fn emit(app: &AppHandle, a: &ActionRef, text: String, spoken: bool) {
     log::info!("{}：{}", a.name, text);
-    let _ = app.emit("pet:line", Line { text, action: a.id.clone(), spoken, level: "talk".into(), volume: 1.0 });
+    let _ = app.emit("pet:line", Line {
+        text,
+        action: a.id.clone(),
+        spoken,
+        level: "talk".into(),
+        volume: 1.0,
+        speech: Some(speech_for_action(&a.id)),
+    });
+}
+
+fn speech_for_action(id: &str) -> SpeechCue {
+    let (emotion, energy, style) = if matches!(id, "sleep" | "nap") {
+        (SpeechEmotion::Sleepy, 0.22, SpeechStyle::Soft)
+    } else if id == "medicine" {
+        (SpeechEmotion::Caring, 0.34, SpeechStyle::Warm)
+    } else if id == "gift" {
+        (SpeechEmotion::Shy, 0.62, SpeechStyle::Warm)
+    } else if matches!(id, "meal" | "snack" | "drink") {
+        (SpeechEmotion::Happy, 0.62, SpeechStyle::Playful)
+    } else if id.starts_with("work_") {
+        (SpeechEmotion::Neutral, 0.48, SpeechStyle::Calm)
+    } else if id.starts_with("study_") {
+        (SpeechEmotion::Neutral, 0.38, SpeechStyle::Calm)
+    } else if id == "rest" {
+        (SpeechEmotion::Sleepy, 0.30, SpeechStyle::Soft)
+    } else {
+        (SpeechEmotion::Neutral, 0.45, SpeechStyle::Calm)
+    };
+    SpeechCue { emotion, energy, style }
 }
 
 /// 不挂在哪个动作上的一句话（生病了、没病不用吃药）。走台词总开关，不受间隔限制——
@@ -170,7 +201,14 @@ pub fn say(app: &AppHandle, tag: &str, text: &str) -> bool {
         return false;
     }
     log::info!("{tag}：{text}");
-    let _ = app.emit("pet:line", Line { text: text.into(), action: tag.into(), spoken: true, level: "talk".into(), volume: 1.0 });
+    let _ = app.emit("pet:line", Line {
+        text: text.into(),
+        action: tag.into(),
+        spoken: true,
+        level: "talk".into(),
+        volume: 1.0,
+        speech: None,
+    });
     true
 }
 
@@ -206,14 +244,21 @@ pub fn say_in_character(app: &AppHandle, tag: &str, facts: &str, level: &str, vo
             }
         };
         log::info!("{tag}：{text}");
-        let _ = app.emit("pet:line", Line { text, action: tag, spoken: true, level, volume });
+        let _ = app.emit("pet:line", Line {
+            text,
+            action: tag,
+            spoken: true,
+            level,
+            volume,
+            speech: Some(SpeechCue { emotion: SpeechEmotion::Neutral, energy: 0.34, style: SpeechStyle::Soft }),
+        });
     });
     true
 }
 
 /// 自言自语：让模型按此刻的处境嘀咕一句，不对你说、不提问、不提醒。
 /// 写不出像样的就一个字不说——自言自语宁缺毋滥。`done` 拿到最终的那句（记账用）
-pub fn mumble(app: &AppHandle, avoid: Vec<String>, volume: f32, done: impl FnOnce(String) + Send + 'static) {
+pub fn mumble(app: &AppHandle, avoid: Vec<String>, variation: u32, volume: f32, done: impl FnOnce(String) + Send + 'static) {
     let Ok(settings) = chat::current_settings(app) else { return };
     if !settings.lines.enabled {
         return;
@@ -224,13 +269,21 @@ pub fn mumble(app: &AppHandle, avoid: Vec<String>, volume: f32, done: impl FnOnc
     tauri::async_runtime::spawn(async move {
         let p = &settings.persona;
         let hour = chrono::Local::now().format("%H:%M").to_string();
-        let avoid_text = if avoid.is_empty() { String::new() } else { format!("\n最近已经说过（别重复意思）：{}", avoid.join(" / ")) };
+        let avoid_text = if avoid.is_empty() { String::new() } else { format!("\n最近已经说过（别复述、改写或重复这些意思）：{}", avoid.join(" / ")) };
+        const ANGLES: [&str; 4] = [
+            "只观察当前动作里的一个小细节，不概括自己正在做什么。",
+            "说一个此刻的身体感觉或情绪，但不要重复活动名称。",
+            "留意周围的声音、光线、天气或桌面环境；不知道时不要编造具体事实。",
+            "冒出一个与当前动作自然相关的小念头，不提醒用户，也不总结状态。",
+        ];
+        let angle = ANGLES[variation as usize % ANGLES.len()];
         let system = format!(
             "你是{}。性格：{}。说话方式：{}。\n现在 {}，{}{}\n\
              自言自语一句（不超过 20 个字）：说说你此刻在做的事、感觉或一个小念头。\
+             这一次换一个角度：{}\
              这句话不是对用户说的——不要用「你」、不要提问、不要提醒、不要打招呼。\
              {}只输出这一句话本身：不要引号、不要解释、不要动作描写。",
-            p.name, p.personality, p.speaking_style, hour, situation, avoid_text, SPOKEN_LANGUAGE_RULE
+            p.name, p.personality, p.speaking_style, hour, situation, avoid_text, angle, SPOKEN_LANGUAGE_RULE
         );
         let raw = match tokio::time::timeout(IN_CHARACTER_TIMEOUT, chat::complete(&settings, &system, "嘀咕一句。", 40, 0.95)).await {
             Ok(Ok(r)) => r,
@@ -248,7 +301,14 @@ pub fn mumble(app: &AppHandle, avoid: Vec<String>, volume: f32, done: impl FnOnc
             return;
         };
         log::info!("自言自语：{text}");
-        let _ = app.emit("pet:line", Line { text: text.clone(), action: "mumble".into(), spoken: true, level: "self".into(), volume });
+        let _ = app.emit("pet:line", Line {
+            text: text.clone(),
+            action: "mumble".into(),
+            spoken: true,
+            level: "self".into(),
+            volume,
+            speech: Some(SpeechCue { emotion: SpeechEmotion::Neutral, energy: 0.30, style: SpeechStyle::Soft }),
+        });
         done(text);
     });
 }
@@ -283,7 +343,8 @@ const MUMBLE_MAX_CHARS: usize = 32;
 fn pick_mumble_line(raw: &str, name: &str, avoid: &[String]) -> Option<String> {
     let ok = |t: &str| {
         let n = t.chars().count();
-        n >= 2 && n <= MUMBLE_MAX_CHARS && !t.contains('你') && !t.contains('?') && !t.contains('？') && !avoid.iter().any(|a| a == t)
+        n >= 2 && n <= MUMBLE_MAX_CHARS && !t.contains('你') && !t.contains('?') && !t.contains('？') &&
+            !avoid.iter().any(|a| mumble_too_similar(t, a))
     };
     raw.lines().map(|l| tidy(l, name)).find_map(|t| {
         if ok(&t) {
@@ -293,6 +354,27 @@ fn pick_mumble_line(raw: &str, name: &str, avoid: &[String]) -> Option<String> {
         let first = first_sentence(&t);
         (first.chars().count() < t.chars().count() && ok(&first)).then_some(first)
     })
+}
+
+/** 不只挡完全相同的句子，也挡模型仅换语气词、标点或少量措辞的复读。 */
+fn mumble_too_similar(a: &str, b: &str) -> bool {
+    use std::collections::HashSet;
+    let clean = |s: &str| -> Vec<char> { s.chars().filter(|c| c.is_alphanumeric()).collect() };
+    let a = clean(a);
+    let b = clean(b);
+    if a == b || (a.len() >= 6 && b.len() >= 6 && (a.starts_with(&b) || b.starts_with(&a))) {
+        return true;
+    }
+    let pairs = |chars: &[char]| -> HashSet<(char, char)> {
+        chars.windows(2).map(|p| (p[0], p[1])).collect()
+    };
+    let ap = pairs(&a);
+    let bp = pairs(&b);
+    if ap.is_empty() || bp.is_empty() {
+        return false;
+    }
+    let common = ap.intersection(&bp).count();
+    common * 2 >= ap.len() + bp.len()
 }
 
 /// 到第一个句末标点为止（含标点）
@@ -480,6 +562,12 @@ mod tests {
         );
         let said = vec!["写字好难。".to_string()];
         assert_eq!(pick_mumble_line("写字好难。", "萝莉斯", &said), None, "说过的不说");
+    }
+
+    #[test]
+    fn 嘀咕会拦住只换标点和少量措辞的复读() {
+        assert!(mumble_too_similar("纸上的字还是有点歪。", "纸上的字还是有点歪~"));
+        assert!(!mumble_too_similar("窗边的光暖暖的。", "这杯茶刚好入口。"));
     }
 
     #[test]

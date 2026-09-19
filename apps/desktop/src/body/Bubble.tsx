@@ -6,10 +6,11 @@ const MAX_LINES = 7
 const CHROME_PX = 52
 /** 流式输出时正文超过这么多字就只显示尾巴——新字要看得见 */
 const STREAM_TAIL_CHARS = 120
-/** 打字机：每个字隔多久冒出来；落后太多（模型一次吐一大段）就加速追上 */
-const TYPE_MS = 28
-const TYPE_FAST_MS = 8
-const TYPE_CATCH_UP_CHARS = 40
+/** 打字机：缩短显示间隔，避免模型流已经到达但气泡还在慢慢追赶 */
+const TYPE_MS = 14
+const TYPE_FAST_MS = 6
+const TYPE_FAST_STEP = 5
+const TYPE_CATCH_UP_CHARS = 24
 /** 白天 / 黑夜的钟点：白天白气泡、黑夜黑气泡（和作息一致：8 点起、19 点天黑） */
 const DAY_FROM_HOUR = 7
 const DAY_UNTIL_HOUR = 19
@@ -63,8 +64,9 @@ export function Bubble({ name, text, streaming, maxHeight, tone = 'talk', theme 
   useEffect(() => {
     if (shownChars >= text.length) return
     const behind = text.length - shownChars
-    const step = behind > TYPE_CATCH_UP_CHARS ? 3 : 1
-    const t = window.setTimeout(() => setShownChars((n) => Math.min(text.length, n + step)), behind > TYPE_CATCH_UP_CHARS ? TYPE_FAST_MS : TYPE_MS)
+    const fast = behind > TYPE_CATCH_UP_CHARS
+    const step = fast ? TYPE_FAST_STEP : 1
+    const t = window.setTimeout(() => setShownChars((n) => Math.min(text.length, n + step)), fast ? TYPE_FAST_MS : TYPE_MS)
     return () => window.clearTimeout(t)
   }, [text, shownChars])
 

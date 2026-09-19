@@ -20,6 +20,8 @@ export interface PlayTarget {
   mood?: Mood
   /** 夹心动画中间那层用哪样食物。Core 挑好了就指定，没指定才随机 */
   foodId?: string
+  /** 同名动画的变体序号；提起动作由左右半区指定。 */
+  variant?: number
 }
 
 /** 'step' = 由外部状态机编排的单段播放，见 playStep */
@@ -51,7 +53,7 @@ export class AnimationPlayer {
   /** Core 指定的食物 id；没指定就随机挑 */
   private foodId: string | undefined
   /** foodId 单独放在 this.foodId，不进 target */
-  private target: Required<Omit<PlayTarget, 'foodId'>> | null = null
+  private target: Required<Omit<PlayTarget, 'foodId' | 'variant'>> & Pick<PlayTarget, 'variant'> | null = null
   private phase: Phase = 'loop'
   /** 绘制顺序：后层 → 前层。tracks[0] 是主轨，它播完就算这一段播完 */
   private tracks: Track[] = []
@@ -61,6 +63,7 @@ export class AnimationPlayer {
   private stopping = false
   /** 这次请求只播一轮；与用户在 start 中途调用 stop() 分开。 */
   private once = false
+  private stopTimer = 0
   /** 连续几次「没有动画」。找到一次就清零 */
   private missingStreak = 0
   private raf = 0
@@ -103,10 +106,24 @@ export class AnimationPlayer {
     await this.startPlay(t, true)
   }
 
+  /** 播放一段时间的循环动画，再按正常流程进入 end。 */
+  async playFor(t: PlayTarget, durationMs: number): Promise<void> {
+    window.clearTimeout(this.stopTimer)
+    await this.startPlay(t, false)
+    if (durationMs > 0) {
+      this.stopTimer = window.setTimeout(() => {
+        this.stopTimer = 0
+        this.stop()
+      }, durationMs)
+    }
+  }
+
   /** once 必须在任何 await 之前绑定到这次 generation，不能用全局延迟补写。 */
   private async startPlay(t: PlayTarget, once: boolean): Promise<void> {
+    window.clearTimeout(this.stopTimer)
+    this.stopTimer = 0
     const gen = ++this.generation
-    this.target = { type: t.type, name: t.name ?? t.type, mood: t.mood ?? 'nomal' }
+    this.target = { type: t.type, name: t.name ?? t.type, mood: t.mood ?? 'nomal', variant: t.variant }
     this.stopping = false
     this.once = once
     this.stepDone = null
@@ -143,7 +160,7 @@ export class AnimationPlayer {
    */
   async playStep(t: PlayTarget, animat: Animat, onDone?: () => void): Promise<void> {
     const gen = ++this.generation
-    this.target = { type: t.type, name: t.name ?? t.type, mood: t.mood ?? 'nomal' }
+    this.target = { type: t.type, name: t.name ?? t.type, mood: t.mood ?? 'nomal', variant: t.variant }
     this.stopping = false
     this.once = false
     const clips = this.resolve(animat)
@@ -157,7 +174,10 @@ export class AnimationPlayer {
     }
     this.missingStreak = 0
     this.stepDone = onDone ?? null
-    await this.switchTo(pick(clips), 'step', gen)
+    const clip = typeof t.variant === 'number'
+      ? clips[Math.max(0, Math.min(t.variant, clips.length - 1))]
+      : pick(clips)
+    await this.switchTo(clip, 'step', gen)
   }
 
   /** 缺动画时延迟回调 onIdle；连续缺太多次就不再回调，免得空转 */
@@ -183,6 +203,8 @@ export class AnimationPlayer {
 
   destroy(): void {
     this.destroyed = true
+    window.clearTimeout(this.stopTimer)
+    this.stopTimer = 0
     cancelAnimationFrame(this.raf)
     for (const frames of this.cache.values()) frames.forEach((b) => b.close())
     this.cache.clear()

@@ -56,7 +56,7 @@ pub const BACK_MAX_PER_DAY: u32 = 3;
 pub const REST_STREAK_MIN: f32 = 120.0;
 pub const REST_ESCALATE_MIN: f32 = 30.0;
 /// 自言自语的间隔区间（分钟）——不均匀才不像闹钟
-pub const MUMBLE_GAP_MIN: (f32, f32) = (25.0, 45.0);
+pub const MUMBLE_GAP_MIN: (f32, f32) = (5.0, 6.0);
 /// 内存占用超过这个百分比就不让模型嘀咕（对话模型要占好几 GB）
 pub const MEMORY_LOAD_MAX: u32 = 85;
 /// 自言自语 / 「歇一下」的音量（0–1）
@@ -133,6 +133,8 @@ pub struct DayBook {
     pub back_count: u32,
     /// 今天嘀咕过的话，给模型「别重复」
     pub mumbles: VecDeque<String>,
+    /// 成功嘀咕的次数；让模型在同一种活动里轮换观察角度。
+    pub mumble_seq: u32,
     pub last_mumble_ms: Option<i64>,
 }
 
@@ -204,6 +206,7 @@ impl DayBook {
         while self.mumbles.len() > 6 {
             self.mumbles.pop_front();
         }
+        self.mumble_seq = self.mumble_seq.wrapping_add(1);
         self.last_mumble_ms = Some(now_ms);
     }
 }
@@ -675,10 +678,19 @@ mod tests {
         m2.memory_load = 90;
         assert!(!mumble_due(&b, &m2, true));
         let mut b2 = b.clone();
-        b2.last_mumble_ms = Some(m.now_ms - 10 * 60_000);
-        assert!(!mumble_due(&b2, &m, true), "十分钟前刚嘀咕过");
-        b2.last_mumble_ms = Some(m.now_ms - 50 * 60_000);
+        b2.last_mumble_ms = Some(m.now_ms - 4 * 60_000);
+        assert!(!mumble_due(&b2, &m, true), "四分钟前刚嘀咕过");
+        b2.last_mumble_ms = Some(m.now_ms - 7 * 60_000);
         assert!(mumble_due(&b2, &m, true));
+    }
+
+    #[test]
+    fn 嘀咕成功后推进角度序号() {
+        let mut b = book();
+        b.note_mumble("窗边的光很暖。", DAY_MS);
+        assert_eq!(b.mumble_seq, 1);
+        b.note_mumble("茶刚好入口。", DAY_MS + 5 * 60_000);
+        assert_eq!(b.mumble_seq, 2);
     }
 
     #[test]

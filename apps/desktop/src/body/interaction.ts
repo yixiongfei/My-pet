@@ -1,5 +1,6 @@
 import type { GraphType, Manifest, PetProfile, PetState } from '@vpet/shared'
 import type { AnimationPlayer } from './AnimationPlayer'
+import type { SpeechCue } from './speech'
 import { ACTION_POOLS, ANIMATION_POOLS, dwellMs, pickEntry, type PoolEntry } from './animationPool'
 import { namesFor, pick, resolveClips, resolveLayered } from './manifest'
 import { CLIP_FOR, DEFAULT_PET_STATE } from './petState'
@@ -13,28 +14,49 @@ import {
   stopPetMotion,
   type PetMotionEvent,
 } from './petWindow'
-import { clickZone, inPinchZone, type ClickZone } from './touch'
+import { clickZone, inPinchZone, pressZone, raiseVariant, type ClickZone } from './touch'
 
 /** 按住多久算长按（原版 Setting.PressLength，默认 0.5s） */
 const PRESS_MS = 500
 const DRAG_THRESHOLD_PX = 6
-/** 空闲多久随机播一个小动作 */
-const IDLE_ACTION_EVERY_MS: [number, number] = [15_000, 40_000]
-/** 原版每次 15 秒空闲判定约有 3/20 机会移动；这里计时更稀疏，适当提高单次命中。 */
-const MOVE_CHANCE = 0.4
-/** 没去移动时，进入原版 StateONE → StateTWO 成对待机姿态的概率。 */
-const STATE_IDLE_CHANCE = 0.35
-/** 提起后先挣扎几次再转静止（原版 rasetype 0→2，共 3 次 Raised_Dynamic） */
-const STRUGGLE_TIMES = 3
-/** 空闲小动作里插「日常」（Relax 的 MI / MU、BDay）的概率 */
-const RELAX_CHANCE = 0.3
-const RELAX_NAMES = ['mi', 'mu', 'bday']
+/** 空闲多久随机播一个小动作；缩短站立等待，保持角色有可见反馈。 */
+const IDLE_ACTION_EVERY_MS: [number, number] = [8_000, 20_000]
+/** 空闲动作中自主移动的占比；避免长期停在原地。 */
+const MOVE_CHANCE = 0.35
+/** 没去移动时进入 StateONE → StateTWO 待机姿态的概率，降低连续站立感。 */
+const STATE_IDLE_CHANCE = 0.2
+/** 提起后先挣扎一次再转静止，避免用户必须长按数秒才能看到 raised_static。 */
+const STRUGGLE_TIMES = 1
+/** 空闲小动作里播放庆祝（BDay）的概率。单独拆出，避免一直被 MI / MU 抽走。 */
+const CELEBRATION_CHANCE = 0.18
+/** 空闲小动作里插日常（Relax 的 MI / MU）的概率 */
+const RELAX_CHANCE = 0.28
+const RELAX_NAMES = ['mi', 'mu']
+/** MI / MU 至少循环一段时间，避免伸懒腰或喝茶刚开始就结束。 */
+const RELAX_PLAY_MS: [number, number] = [8_000, 12_000]
 /** 全身状态都很好时，空闲小动作有这个概率变成飞吻（WORK/kiss） */
 const KISS_CHANCE = 0.2
 /** 「全面状态都很高」的门槛 */
 const KISS_MIN = { strength: 80, feeling: 80, hunger: 70, thirst: 70, health: 80, affection: 60 }
 /** 吃饭时有这个概率是在吃麦当劳（Eat/EatMcDonald，不用夹心） */
 const MCDONALD_CHANCE = 0.2
+/** 启动后检查的节日；日期按本机时区判断，避免跨时区时祝福日期漂移。 */
+const SPECIAL_DAYS: Array<{
+  month: number
+  day: number
+  key: string
+  type: GraphType
+  name: string
+  foodId?: string
+  text: string
+  speech: SpeechCue
+}> = [
+  { month: 1, day: 1, key: 'new-year', type: 'startup' as GraphType, name: 'newyear', text: '新年快乐！今年也一起好好生活吧。', speech: { emotion: 'excited' as const, energy: 0.82, style: 'playful' as const } },
+  { month: 2, day: 14, key: 'valentines-day', type: 'work' as GraphType, name: 'kiss', text: '情人节快乐，送你一个喜欢的飞吻。', speech: { emotion: 'shy' as const, energy: 0.72, style: 'warm' as const } },
+  { month: 6, day: 7, key: 'user-birthday', type: 'common' as GraphType, name: 'bday', foodId: 'birthday-cake', text: '生日快乐！今天要把开心和好运都收好哦。', speech: { emotion: 'happy' as const, energy: 0.8, style: 'playful' as const } },
+  { month: 8, day: 14, key: 'pet-birthday', type: 'common' as GraphType, name: 'bday', foodId: 'birthday-cake', text: '今天是我的生日，也想把快乐分给你。', speech: { emotion: 'happy' as const, energy: 0.78, style: 'warm' as const } },
+  { month: 12, day: 25, key: 'christmas', type: 'common' as GraphType, name: 'bday', text: '圣诞快乐！愿今天有礼物，也有好心情。', speech: { emotion: 'happy' as const, energy: 0.74, style: 'warm' as const } },
+]
 /** 说话动画：各种话配哪套 say。self 自言自语 · serious 正经提醒 · shining 开心 · shy 害羞 */
 export type SayStyle = 'self' | 'serious' | 'shining' | 'shy'
 const MOOD_RANK: Record<PetState['mood'], number> = { ill: 0, poorcondition: 1, nomal: 2, happy: 3 }
@@ -53,6 +75,8 @@ export interface InteractionOpts {
   onDragChange?: (dragging: boolean) => void
   /** 侧挂的角色被碰到：先让 Core 把窗口完整拉回屏幕 */
   onSideExit?: () => void
+  /** 开心时的庆祝 / 飞吻台词；由 Body 统一负责气泡和 TTS。 */
+  onAmbientLine?: (text: string, speech: SpeechCue) => void
 }
 
 /**
@@ -75,6 +99,7 @@ export class Interaction {
   private struggles = 0
   private released = false
   private raiseName = 'raise'
+  private raiseVariant: 0 | 1 = 0
   private pinned = false
   private disposed = false
   /** 正在出声（语音在放）。一次性动画播完后 toActivity 会先接上 say 动画 */
@@ -100,6 +125,9 @@ export class Interaction {
   private moveGeneration = 0
   /** 退出动画完成后通知 Core 真正结束进程；Rust 另有超时兜底。 */
   private shutdownDone: (() => void) | null = null
+  private lastLoveLineAt = 0
+  private specialDayPlayed = false
+  private specialFoodId: string | null = null
 
   constructor(private readonly o: InteractionOpts) {}
 
@@ -109,7 +137,7 @@ export class Interaction {
     if (this.hasClip('startup', 'startup')) {
       this.mode = 'startup'
       void this.o.player.playOnce({ type: 'startup', name: 'startup', mood: this.state.mood })
-    } else this.toActivity()
+    } else if (!this.playSpecialDay()) this.toActivity()
   }
 
   /**
@@ -283,11 +311,11 @@ export class Interaction {
     const generation = ++this.sideGeneration
     if (hovered) {
       const type = this.sideType(side, 'rise')
-      void this.o.player.playStep({ type, mood: this.state.mood }, 'start', () =>
+      void this.o.player.playStep({ type, name: type, mood: this.state.mood }, 'start', () =>
         this.loopSide(type, side, generation))
     } else {
       const rise = this.sideType(side, 'rise')
-      void this.o.player.playStep({ type: rise, mood: this.state.mood }, 'end', () =>
+      void this.o.player.playStep({ type: rise, name: rise, mood: this.state.mood }, 'end', () =>
         this.loopSide(this.sideType(side, 'main'), side, generation))
     }
   }
@@ -300,7 +328,7 @@ export class Interaction {
     window.clearTimeout(this.idleTimer)
     window.clearTimeout(this.poolTimer)
     window.clearTimeout(this.pressTimer)
-    endPetDrag()
+    if (this.mode === 'raised') endPetDrag()
     this.o.player.onIdle = null
     if (this.pinned) void setHitTestPinned(false)
   }
@@ -338,7 +366,7 @@ export class Interaction {
       this.pressTimer = 0
       // 按在脸上拖 = 捏脸（原版 Pinch）；别处拖 = 提起
       if (this.pressOnFace) this.pinch()
-      else this.raise()
+      else if (pressZone(this.o.profile, this.state.mood, this.pressAt.x, this.pressAt.y)) this.raise()
     }
   }
 
@@ -348,14 +376,12 @@ export class Interaction {
     window.clearTimeout(this.pressTimer)
     this.pressTimer = 0
     this.pressAt = null
-    endPetDrag()
-    this.setPinned(false)
-
     if (this.mode === 'raised') {
-      this.released = true // 等当前段播完再落地，落地后 toActivity 解钉
+      endPetDrag()
       this.o.onDragChange?.(false)
       return
     }
+    this.setPinned(false)
     if (this.mode === 'pinching') {
       this.o.player.stop() // 松手：播 C 段放开脸，收尾回当前活动
       return
@@ -373,6 +399,13 @@ export class Interaction {
       this.scheduleIdleAction() // 点在空白处：恢复空闲计时
     }
     this.o.onClick?.()
+  }
+
+  /** Rust 完成慢速归位或惯性落地后，才播放提起动作的收尾。 */
+  onDragSettled(): void {
+    if (this.disposed || this.mode !== 'raised' || this.released) return
+    this.released = true
+    this.setPinned(false)
   }
 
   /* ------------------------------------------------------------ */
@@ -447,6 +480,21 @@ export class Interaction {
       done?.()
       return
     }
+    if (this.mode === 'startup' && this.playSpecialDay()) return
+    if (this.specialFoodId) {
+      const foodId = this.specialFoodId
+      this.specialFoodId = null
+      if (this.hasClip('common', 'eat')) {
+        this.mode = 'transition'
+        void this.o.player.playOnce({
+          type: 'common',
+          name: 'eat',
+          mood: this.state.mood,
+          foodId,
+        })
+        return
+      }
+    }
     if (this.mode === 'idle-state-one' && this.state.activity === 'idle' &&
       Math.random() < 0.6 && this.hasClip('statetwo', 'state')) {
       this.mode = 'idle-state-two'
@@ -454,6 +502,21 @@ export class Interaction {
       return
     }
     this.toActivity()
+  }
+
+  /** 启动动画结束后播放当天的节日动作，并保证本次启动只触发一次。 */
+  private playSpecialDay(): boolean {
+    if (this.specialDayPlayed) return false
+    this.specialDayPlayed = true
+    const now = new Date()
+    const special = SPECIAL_DAYS.find((day) => day.month === now.getMonth() + 1 && day.day === now.getDate())
+    if (!special || !this.hasClip(special.type, special.name)) return false
+    if (special.foodId && this.o.manifest.food.some((food) => food.id === special.foodId)) {
+      this.specialFoodId = special.foodId
+    }
+    void this.o.player.playOnce({ type: special.type, name: special.name, mood: this.state.mood })
+    this.o.onAmbientLine?.(special.text, special.speech)
+    return true
   }
 
   /**
@@ -536,16 +599,32 @@ export class Interaction {
       }
     }
 
+    // 庆祝动作单独抽样，避免和 MI / MU 共用一个三选一概率导致 BDay 很难出现。
+    if (Math.random() < CELEBRATION_CHANCE && this.hasClip('common', 'bday')) {
+      void this.o.player.playOnce({ type: 'common', name: 'bday', mood: this.state.mood })
+      this.sayLoveLine('今天也要开心呀，喜欢你。', {
+        emotion: 'happy', energy: 0.78, style: 'playful',
+      })
+      return
+    }
     // 全身状态都很好的时候，偶尔来个飞吻（WORK/kiss）
     if (this.feelingGreat() && Math.random() < KISS_CHANCE && this.hasClip('work', 'kiss')) {
       void this.o.player.playOnce({ type: 'work', name: 'kiss', mood: this.state.mood })
+      this.sayLoveLine('给你一个飞吻，接住哦。', {
+        emotion: 'shy', energy: 0.68, style: 'warm',
+      })
       return
     }
+
     // 日常：伸懒腰 / 喝茶（Relax 的 MI、MU）、过生日那套（BDay）
     if (Math.random() < RELAX_CHANCE) {
       const names = RELAX_NAMES.filter((n) => this.hasClip('common', n))
       if (names.length) {
-        void this.o.player.playOnce({ type: 'common', name: pick(names), mood: this.state.mood })
+        const [lo, hi] = RELAX_PLAY_MS
+        void this.o.player.playFor(
+          { type: 'common', name: pick(names), mood: this.state.mood },
+          lo + Math.random() * (hi - lo),
+        )
         return
       }
     }
@@ -559,6 +638,12 @@ export class Interaction {
     const names = namesFor(this.o.manifest, 'idel', this.state.mood)
     if (names.length) void this.o.player.playOnce({ type: 'idel', name: pick(names), mood: this.state.mood })
     else this.scheduleIdleAction()
+  }
+
+  private sayLoveLine(text: string, speech: SpeechCue): void {
+    if (this.state.mood !== 'happy' || Date.now() - this.lastLoveLineAt < 90_000) return
+    this.lastLoveLineAt = Date.now()
+    this.o.onAmbientLine?.(text, speech)
   }
 
   /** Core 听声音：歌到高潮 / 过去了。只在她正跟着歌跳的时候换画面 */
@@ -594,13 +679,15 @@ export class Interaction {
 
   private raise(): void {
     const anchor = this.pressAt
-    if (!anchor || this.mode === 'raised') return
+    if (!anchor || this.mode === 'raised' ||
+      !pressZone(this.o.profile, this.state.mood, anchor.x, anchor.y)) return
     this.mode = 'raised'
     this.released = false
     this.struggles = 0
     const mood = this.state.mood
     const names = namesFor(this.o.manifest, 'raised_static', mood)
     this.raiseName = names.length ? pick(names) : 'raise'
+    this.raiseVariant = raiseVariant(this.o.profile, mood, anchor.x)
     this.o.onTouch?.('raise')
     this.o.onDragChange?.(true)
     // Keep the original grab point. Rust follows the physical cursor directly,
@@ -617,20 +704,20 @@ export class Interaction {
     const mood = this.state.mood
     const name = this.raiseName
     if (this.released) {
-      void this.o.player.playStep({ type: 'raised_static', name, mood }, 'end', () => this.toActivity())
+      void this.o.player.playStep({ type: 'raised_static', name, mood, variant: this.raiseVariant }, 'end', () => this.toActivity())
       return
     }
     if (this.struggles < STRUGGLE_TIMES) {
       this.struggles++
-      void this.o.player.playStep({ type: 'raised_dynamic', name, mood }, 'single', this.raiseStep)
+      void this.o.player.playStep({ type: 'raised_dynamic', name, mood, variant: this.raiseVariant }, 'single', this.raiseStep)
       return
     }
     if (this.struggles === STRUGGLE_TIMES) {
       this.struggles++
-      void this.o.player.playStep({ type: 'raised_static', name, mood }, 'start', this.raiseStep)
+      void this.o.player.playStep({ type: 'raised_static', name, mood, variant: this.raiseVariant }, 'start', this.raiseStep)
       return
     }
-    void this.o.player.playStep({ type: 'raised_static', name, mood }, 'loop', this.raiseStep)
+    void this.o.player.playStep({ type: 'raised_static', name, mood, variant: this.raiseVariant }, 'loop', this.raiseStep)
   }
 
   /* ------------------------ 自主移动 ------------------------ */
@@ -729,13 +816,13 @@ export class Interaction {
     this.mode = 'side'
     const generation = ++this.sideGeneration
     const type = this.sideType(side, 'main')
-    void this.o.player.playStep({ type, mood: this.state.mood }, 'start', () =>
+    void this.o.player.playStep({ type, name: type, mood: this.state.mood }, 'start', () =>
       this.loopSide(type, side, generation))
   }
 
   private loopSide(type: GraphType, side: 'left' | 'right', generation: number): void {
     if (this.disposed || generation !== this.sideGeneration || this.mode !== 'side' || this.side !== side) return
-    void this.o.player.playStep({ type, mood: this.state.mood }, 'loop', () =>
+    void this.o.player.playStep({ type, name: type, mood: this.state.mood }, 'loop', () =>
       this.loopSide(type, side, generation))
   }
 
@@ -747,7 +834,7 @@ export class Interaction {
     this.mode = 'side-exit'
     const generation = ++this.sideGeneration
     const type = this.sideType(side, 'main')
-    void this.o.player.playStep({ type, mood: this.state.mood }, 'end', () => {
+    void this.o.player.playStep({ type, name: type, mood: this.state.mood }, 'end', () => {
       if (!this.disposed && generation === this.sideGeneration && this.mode === 'side-exit') this.toActivity()
     })
   }

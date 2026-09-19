@@ -77,6 +77,15 @@ export interface SpeechCue {
 /** reset = 模型没进角色重来了一次，前面流出来的字作废 */
 export interface StreamEvent { requestId: string; delta: string; done: boolean; text?: string; reset?: boolean; speech?: SpeechCue }
 
+/** 只清理聊天展示中的内部协议，原始内容仍保留给发送、反馈和 Core 使用。 */
+export function filterChatDisplayText(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/gi, '')
+    .replace(/\[\[speech:[^\]]*\]\]/gi, '')
+    .replace(/\[\[speech:[^\]]*$/gi, '')
+}
+
 /** 与 tts.rs 的 NEURO_STYLE / VoiceSettings::default 一致 */
 export const NEURO_STYLE = '语气平稳、起伏小，节奏偏快，音调偏高，像轻快的电子少女音 / flat calm intonation, quick pace, slightly high pitch, light synthetic girl voice'
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {

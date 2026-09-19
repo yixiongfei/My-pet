@@ -263,6 +263,8 @@ pub enum Event {
 pub(crate) const STARVING: f32 = 20.0;
 pub(crate) const PARCHED: f32 = 20.0;
 pub(crate) const EXHAUSTED: f32 = 15.0;
+/// 夜间开始明显犯困的体力线；体力越低，23 点后的入睡概率越高
+const NIGHT_SLEEP_START: f32 = 80.0;
 /// 心情崩到这个程度，再忙也得歇一会儿——人不会把自己磨到彻底麻木还接着干
 pub(crate) const MISERABLE: f32 = 15.0;
 /// 没到饭点但也该补一口了
@@ -567,7 +569,9 @@ fn tick(cat: &Catalog, shelf: &FoodShelf, n: &mut Pet, minutes: f32, hour: f32) 
         },
         None => (d.hunger, d.thirst, d.feeling),
     };
-    n.state.strength += d.strength * minutes;
+    // 23:00–08:00 进入夜间疲劳，只加倍消耗，不加倍睡觉恢复。
+    let strength_multiplier = if is_night(hour) && d.strength < 0.0 { 2.0 } else { 1.0 };
+    n.state.strength += d.strength * minutes * strength_multiplier;
     n.state.hunger += dh * minutes;
     n.state.thirst += dt * minutes;
     n.state.feeling += df * minutes;
@@ -645,9 +649,10 @@ fn tick(cat: &Catalog, shelf: &FoodShelf, n: &mut Pet, minutes: f32, hour: f32) 
             .map(|d| (d.target.as_str(), "你让我做的"))
             .or(n.pinned_tag.as_deref().map(|t| (t, "番茄钟")));
         let chosen = if n.music {
-            // 你在放歌：吃饭睡觉这两件到点的事之外，她都先跟着跳
+            // 你在放歌：吃饭和夜间困意之外，她都先跟着跳
             match best(cat, "music", |a| meets(a, &n.state)) {
-                Some(a) if !scheduled_need_now(cat, &n.state, hour) => (a, "你在放歌"),
+                Some(a) if !scheduled_need_now(cat, &n.state, hour)
+                    && !should_sleep_at_night(&n.state, hour) => (a, "你在放歌"),
                 _ => decide_with_pin(cat, &n.state, &n.cooldowns, hour, hold, &n.biases),
             }
         } else {
@@ -657,9 +662,32 @@ fn tick(cat: &Catalog, shelf: &FoodShelf, n: &mut Pet, minutes: f32, hour: f32) 
     }
 }
 
-/// 现在是不是到了该睡 / 该吃的点（decide 的 2a 层）。放歌时这两件事仍然排在跳舞前面
+/// 现在是不是到了该吃的点（decide 的 2a 层）。夜间睡眠由体力概率单独判断。
 fn scheduled_need_now(cat: &Catalog, s: &PetState, hour: f32) -> bool {
-    ["sleep", "eat"].iter().any(|tag| best(cat, tag, |a| a.is_scheduled() && a.fits_hour(hour) && meets(a, s)).is_some())
+    best(cat, "eat", |a| a.is_scheduled() && a.fits_hour(hour) && meets(a, s)).is_some()
+}
+
+fn is_night(hour: f32) -> bool {
+    hour >= 23.0 || hour < 8.0
+}
+
+fn night_sleep_probability(strength: f32) -> f32 {
+    ((NIGHT_SLEEP_START - strength).max(0.0) / (NIGHT_SLEEP_START - EXHAUSTED)).powi(2).min(1.0)
+}
+
+/// 用状态中的更新时间和体力生成可复现掷骰；reduce 不读取随机源，仍保持纯函数。
+fn night_sleep_roll(s: &PetState) -> f32 {
+    let mut x = s.updated_at as u64 ^ s.strength.to_bits() as u64;
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xbf58476d1ce4e5b9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94d049bb133111eb);
+    x ^= x >> 31;
+    (x as f32) / (u64::MAX as f32)
+}
+
+fn should_sleep_at_night(s: &PetState, hour: f32) -> bool {
+    is_night(hour) && night_sleep_roll(s) < night_sleep_probability(s.strength)
 }
 
 /// `target` 既可以是动作 id（`work_copy`）也可以是 tag（`play`）
@@ -673,6 +701,10 @@ fn should_switch(cat: &Catalog, n: &Pet, hour: f32) -> bool {
     let Some(cur) = n.state.action.as_ref().and_then(|a| cat.get(&a.id)) else {
         return true;
     };
+    // 睡眠只属于夜间循环；早上 08:00 后应立即回到正常作息。
+    if cur.has_tag("sleep") && !is_night(hour) {
+        return true;
+    }
     // 生理急需和情绪崩溃压过一切
     if n.state.hunger < STARVING || n.state.thirst < PARCHED || n.state.strength < EXHAUSTED {
         return !cur.has_tag("need") && !cur.has_tag("sleep");
@@ -689,6 +721,10 @@ fn should_switch(cat: &Catalog, n: &Pet, hour: f32) -> bool {
         return true;
     }
     if n.music && !cur.has_tag("music") && !cur.has_tag("need") && !cur.has_tag("sleep") {
+        return true;
+    }
+    // 夜间困意可以在工作、学习或跳舞的动作中途生效，不必等当前动作完整结束。
+    if !cur.has_tag("sleep") && should_sleep_at_night(&n.state, hour) {
         return true;
     }
     // 你刚让她做的事，保护期内只要还在做就别换
@@ -789,22 +825,26 @@ pub fn decide_with_pin<'a>(
         }
     }
 
-    // 番茄钟 / 你让她做的事：生理这关过了就听它的，作息和心情都往后排
+    // 2a. 到点吃饭。睡觉不是硬切换，而是夜间按体力概率决定。
+    if should_sleep_at_night(s, hour) {
+        if let Some(a) = best(cat, "sleep", |a| meets(a, s)) {
+            return (a, "晚上困了");
+        }
+    }
+    for (tag, why) in [("eat", "到饭点了")] {
+        if let Some(a) = best(cat, tag, |a| a.is_scheduled() && a.fits_hour(hour) && ok(a)) {
+            return (a, why);
+        }
+    }
+
+    // 2b. 番茄钟 / 你让她做的事：夜间困意之后才执行。
     if let Some((target, why)) = hold {
         if let Some(a) = best_matching(cat, target, |a| meets(a, s) && !bedridden(a, s)) {
             return (a, why);
         }
     }
 
-    // 2a. 到点该睡该吃。**用户偏好排不过这一层**——
-    //     「多工作一点」不等于「别睡觉也别吃饭」。这条是安全边界，别挪到下面去
-    for (tag, why) in [("sleep", "到点睡觉"), ("eat", "到饭点了")] {
-        if let Some(a) = best(cat, tag, |a| a.is_scheduled() && a.fits_hour(hour) && ok(a)) {
-            return (a, why);
-        }
-    }
-
-    // 2b. 正事和玩：这三类才听用户的。按偏好重排（稳定排序，没偏好时休闲优先），
+    // 2c. 正事和玩：这三类才听用户的。按偏好重排（稳定排序，没偏好时休闲优先），
     //     正偏置够大的还能越出自己的时段——「多工作」会让她晚上也想干活
     let mut lanes = [
         ("play", "该放松一下", "你说要多玩会儿"),
@@ -1125,10 +1165,19 @@ mod tests {
     }
 
     #[test]
-    fn 半夜会去睡觉() {
+    fn 夜间体力很低会去睡觉() {
         let c = cat();
-        let p = run(&c, Pet::default(), 5, 23.5);
-        assert_eq!(p.state.activity, Activity::Sleeping, "凌晨该睡了");
+        let mut p = Pet::default();
+        p.state.strength = EXHAUSTED;
+        let p = run(&c, p, 1, 23.5);
+        assert_eq!(p.state.activity, Activity::Sleeping, "体力很低时夜里应该睡觉");
+    }
+
+    #[test]
+    fn 夜间体力越低入睡概率越高() {
+        assert!(night_sleep_probability(60.0) > night_sleep_probability(70.0));
+        assert!(night_sleep_probability(30.0) > night_sleep_probability(60.0));
+        assert_eq!(night_sleep_probability(100.0), 0.0);
     }
 
     /* ---------- 门槛上不抽搐（换花样是 Body 的事：动画池，见 05 §8） ---------- */
@@ -1153,18 +1202,21 @@ mod tests {
     }
 
     #[test]
-    fn 早上八点会起床_哪怕时钟停过() {
-        // 23 点躺下，电脑随后待机到早上——期间一拍都没走。醒来第一拍在 8 点之后，
-        // 不管这一觉「按拍数」睡够没有，作息都该把她叫起来
+    fn 晚上十一点不会强制睡觉() {
         let c = cat();
-        let mut p = run(&c, Pet::default(), 3, 23.0);
-        assert_eq!(p.state.activity, Activity::Sleeping, "前提：23 点该睡了");
+        let p = run(&c, Pet::default(), 1, 23.0);
+        assert_ne!(p.state.activity, Activity::Sleeping, "体力充足时 23 点不应硬切睡觉");
+    }
+
+    #[test]
+    fn 早上八点会叫醒夜间睡眠() {
+        let c = cat();
+        let mut p = Pet::default();
+        p.state.strength = EXHAUSTED;
+        p = run(&c, p, 1, 23.0);
+        assert_eq!(p.state.activity, Activity::Sleeping);
         p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0 / 60.0, hour: 8.05 });
-        assert_ne!(p.state.activity, Activity::Sleeping, "八点过了还在睡");
-        // 七点半还在睡觉时段里
-        let mut q = run(&c, Pet::default(), 3, 23.0);
-        q = reduce(&c, &shelf(), &q, &Event::Tick { minutes: 1.0 / 60.0, hour: 7.5 });
-        assert_eq!(q.state.activity, Activity::Sleeping, "七点半该还在睡");
+        assert_ne!(p.state.activity, Activity::Sleeping, "八点过后不应继续睡");
     }
 
     #[test]
@@ -1403,6 +1455,7 @@ mod tests {
         let c = cat();
         let s = PetState {
             feeling: 25.0, // 低于 SAD 但没到崩溃，作息说了算
+            strength: EXHAUSTED,
             money: 9999.0,
             ..Default::default()
         };
@@ -1616,6 +1669,7 @@ mod tests {
         let c = cat();
         let mut p = Pet::default();
         p = reduce(&c, &shelf(), &p, &Event::Pin(Some("work".into())));
+        p.state.strength = EXHAUSTED;
         p = reduce(&c, &shelf(), &p, &Event::Pin(None));
         p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 2.0 });
         assert_eq!(p.state.activity, Activity::Sleeping, "松开后凌晨两点该睡觉");
@@ -1842,11 +1896,11 @@ mod tests {
     /* --- 下面三条是安全边界：偏好排不过生理。别删 --- */
 
     #[test]
-    fn 多工作也不会不睡觉() {
+    fn 多工作不会在晚上十一点被强制打断() {
         let c = cat();
         let keen = biased(&c, "work", 2.0);
         let id = at(&c, &keen, 1.0); // 凌晨一点
-        assert!(c.get(&id).unwrap().has_tag("sleep"), "凌晨一点她在 {id}");
+        assert!(c.get(&id).unwrap().has_tag("work"), "体力足够时凌晨一点不应强制睡觉：{id}");
     }
 
     #[test]
@@ -2293,11 +2347,9 @@ mod tests {
             // 睡觉每分钟回 1 体力，按在线下两格才能整分钟都算「累着」
             hold(&mut low, UNWELL - 1.0, UNWELL - 1.0, UNWELL - 2.0);
             hold(&mut fine, UNWELL + 1.0, UNWELL + 1.0, UNWELL + 1.0);
-            low = reduce(&c, &shelf(), &low, &Event::Tick { minutes: 1.0, hour: 3.0 });
-            fine = reduce(&c, &shelf(), &fine, &Event::Tick { minutes: 1.0, hour: 3.0 });
+            low = reduce(&c, &shelf(), &low, &Event::Tick { minutes: 1.0, hour: 10.0 });
+            fine = reduce(&c, &shelf(), &fine, &Event::Tick { minutes: 1.0, hour: 10.0 });
         }
-        assert_eq!(low.state.activity, Activity::Sleeping);
-        assert_eq!(fine.state.activity, Activity::Sleeping);
         let lost = fine.state.health - low.state.health;
         let expected = HEALTH_LOSS * 3.0 * 60.0 + HEALTH_REGEN * 60.0;
         assert!((lost - expected).abs() < 0.5, "一小时该差 {expected}，差了 {lost}");
@@ -2312,7 +2364,7 @@ mod tests {
         p.state.health = 70.0;
         for _ in 0..120 {
             hold(&mut p, 90.0, 90.0, 90.0);
-            p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 3.0 });
+            p = reduce(&c, &shelf(), &p, &Event::Tick { minutes: 1.0, hour: 10.0 });
         }
         assert!(p.state.health > 70.0, "两小时没养回来一点：{}", p.state.health);
         assert!(p.state.health < 80.0, "养得太快了：{}", p.state.health);
@@ -2324,8 +2376,8 @@ mod tests {
         for _ in 0..60 {
             hold(&mut sick, 90.0, 90.0, 90.0);
             hold(&mut well, 90.0, 90.0, 90.0);
-            sick = reduce(&c, &shelf(), &sick, &Event::Tick { minutes: 1.0, hour: 3.0 });
-            well = reduce(&c, &shelf(), &well, &Event::Tick { minutes: 1.0, hour: 3.0 });
+            sick = reduce(&c, &shelf(), &sick, &Event::Tick { minutes: 1.0, hour: 10.0 });
+            well = reduce(&c, &shelf(), &well, &Event::Tick { minutes: 1.0, hour: 10.0 });
         }
         assert!(sick.state.health <= 40.0, "病了不该自己好：{}", sick.state.health);
         let gap = well.state.feeling - sick.state.feeling;
