@@ -36,6 +36,8 @@ const RELAX_NAMES = ['mi', 'mu']
 const RELAX_PLAY_MS: [number, number] = [8_000, 12_000]
 /** 全身状态都很好时，空闲小动作有这个概率变成飞吻（WORK/kiss） */
 const KISS_CHANCE = 0.2
+/** 爱意台词的最短间隔（毫秒）；庆祝动作会频繁抽样，不能每次都播台词。 */
+const LOVE_LINE_COOLDOWN_MS = 5 * 60_000
 /** 「全面状态都很高」的门槛 */
 const KISS_MIN = { strength: 80, feeling: 80, hunger: 70, thirst: 70, health: 80, affection: 60 }
 /** 吃饭时有这个概率是在吃麦当劳（Eat/EatMcDonald，不用夹心） */
@@ -128,6 +130,8 @@ export class Interaction {
   private lastLoveLineAt = 0
   private specialDayPlayed = false
   private specialFoodId: string | null = null
+  /** 上次播出的爱意台词，防止不同触发路径连续说同一句。 */
+  private lastLoveLineText: string | null = null
 
   constructor(private readonly o: InteractionOpts) {}
 
@@ -641,8 +645,12 @@ export class Interaction {
   }
 
   private sayLoveLine(text: string, speech: SpeechCue): void {
-    if (this.state.mood !== 'happy' || Date.now() - this.lastLoveLineAt < 90_000) return
-    this.lastLoveLineAt = Date.now()
+    const now = Date.now()
+    if (this.state.mood !== 'happy'
+      || now - this.lastLoveLineAt < LOVE_LINE_COOLDOWN_MS
+      || text === this.lastLoveLineText) return
+    this.lastLoveLineAt = now
+    this.lastLoveLineText = text
     this.o.onAmbientLine?.(text, speech)
   }
 
